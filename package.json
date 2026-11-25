@@ -10,8 +10,9 @@
     "update-ytdlp": "bin\\yt-dlp.exe -U",
     "lan:unix": "LAN=1 node server.js",
     "update-ytdlp:unix": "yt-dlp -U",
-    "release": "powershell -NoProfile -ExecutionPolicy Bypass -File build-release.ps1",
-    "release:debugkey": "powershell -NoProfile -ExecutionPolicy Bypass -File build-release.ps1 -DebugKey"
+    "release": "node scripts/release.mjs",
+    "release:web": "node scripts/release.mjs --skip-android",
+    "release:debugkey": "node scripts/release.mjs --debug-key"
   },
   "dependencies": {
     "express": "^4.21.2"
