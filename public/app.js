@@ -278,10 +278,28 @@ async function load(start, play = true) {
     if (seq !== loadSeq || current?.id !== id) return; // a newer seek or video took over
   }
   offset = at; pendingAt = null;
-  v.src = `/stream/${id}?mode=${mode()}&q=${eff('quality')}` + (at ? `&t=${at}` : '');
+  if (audio || !IOS) v.src = `/stream/${id}?mode=${mode()}&q=${eff('quality')}` + (at ? `&t=${at}` : '');
+  else {
+    if (play) setState('loading');
+    const u = await videoUrl(id, eff('quality'), at);
+    if (seq !== loadSeq || current?.id !== id) return;
+    v.src = u;
+  }
   v.defaultPlaybackRate = rate; v.playbackRate = rate;
   if (audio && start) v.addEventListener('loadedmetadata', () => { v.currentTime = start; }, { once: true });
   if (play) { setState('loading'); v.play().catch(() => setState('paused')); } else setState('paused'); // a seek while paused stays paused
+}
+
+// iPhone / iPad: Safari can't play the piped MP4 (no length, no byte ranges), so video comes as HLS from /api/hls.
+const IOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+async function videoUrl(id, q, at = 0) {
+  const plain = `/stream/${id}?mode=video&q=${q}` + (at ? `&t=${at}` : '');
+  if (!IOS) return plain;
+  try {
+    const r = await fetch(`/api/hls/${id}?q=${q}` + (at ? `&t=${at}` : ''));
+    const j = await r.json();
+    return j.url || plain;
+  } catch { return plain; }
 }
 
 // Pre-resolve the next queue item (the slow yt-dlp step) shortly before the current one ends, so it starts at once.
@@ -1128,9 +1146,8 @@ function openShortsFeed(startId) {
     fav.classList.toggle('on', isSaved('favs', it.id));
     side.append(fav);
     col.append(vid, spin, err, info, side, prog); s.append(col);
-    const url = `/stream/${it.id}?mode=video&q=1080`; // height cap: a 1080p Short is 608x1080
     let attached = false;
-    s.warm = () => { if (!attached) { attached = true; vid.src = url; } };
+    s.warm = () => { if (!attached) { attached = true; videoUrl(it.id, 1080).then(u => { if (attached) vid.src = u; }); } }; // height cap: a 1080p Short is 608x1080
     s.play = () => { if (vid.ended) { attached = false; vid.removeAttribute('src'); } s.warm(); s.classList.remove('err'); vid.muted = st.muted; vid.play().catch(() => {}); };
     s.release = () => { vid.pause(); if (attached) { attached = false; vid.removeAttribute('src'); vid.load(); } s.classList.remove('loading'); };
     s.pause = () => vid.pause();

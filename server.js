@@ -2,7 +2,7 @@ import express from 'express';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import crypto from 'node:crypto';
 import os from 'node:os';
 import { mkdtemp, readFile, rm, mkdir } from 'node:fs/promises';
@@ -176,6 +176,7 @@ app.use((req, res, next) => {
   if (isLoopback(ip)) return next();
   if (!LAN) return res.status(403).end();
   if (req.path === '/login' && req.method === 'POST') return next();
+  if (req.method === 'GET' && hlsSession(req.path)) return next(); // an HLS playlist/segment: the random id in the path is the key
 
   const lock = failures.get(ip);
   if (lock && lock.until > Date.now()) return res.status(429).send('Too many wrong PINs. Try again in a few minutes.');
@@ -561,6 +562,72 @@ app.get('/stream/:id', guard(async (req, res) => {
   if (entry.live) return streamLive(res, id, mode, entry);
   return mode === 'audio' ? pipeFormat(req, res, id, 'audio', 0, 0) : streamVideo(req, res, id);
 }));
+
+/* ---------- HLS for iPhone / iPad ---------- */
+// Safari on iOS only plays a <video> from a source that answers byte ranges or from HLS: the fragmented-MP4 pipe above
+// (no length, no ranges) just fails there. So for iOS the page asks /api/hls/:id for a session: ffmpeg copies the same
+// video + audio into fMP4 HLS segments in .cache/hls/<id>/, and the page plays /hls/<id>/index.m3u8. Seeking works as
+// before (the page asks for a new session with ?t=). The random id in the path is the credential for the segment requests
+// (the native player may not send the PIN cookie); sessions and their files are removed when idle.
+const HLS_DIR = path.join(ROOT, '.cache', 'hls');
+const hlsSessions = new Map(); // id -> { dir, ff, last }
+rmSync(HLS_DIR, { recursive: true, force: true });
+const HLS_FILE = /^[\w.-]+\.(m3u8|m4s|mp4)$/;
+function hlsSession(reqPath) {
+  const m = /^\/hls\/([a-f0-9]{32})\//.exec(reqPath);
+  return m ? hlsSessions.get(m[1]) : undefined;
+}
+function hlsEnd(token) {
+  const sess = hlsSessions.get(token); if (!sess) return;
+  hlsSessions.delete(token);
+  try { sess.ff.kill(); } catch { /* already gone */ }
+  setTimeout(() => rmSync(sess.dir, { recursive: true, force: true }), 1000);
+}
+setInterval(() => { for (const [t, s] of hlsSessions) if (Date.now() - s.last > 120_000) hlsEnd(t); }, 30_000).unref();
+
+app.get('/api/hls/:id', guard(async (req, res) => {
+  const id = req.params.id, h = heightOf(req);
+  const entry = await resolveStream(id, 'video', h);
+  if (entry.live) return res.json({ url: null }); // live streams already come as HLS from the source; not handled for iOS yet
+  const t = await keyframeAt(id, h, Math.max(0, Number(req.query.t) || 0));
+  while (hlsSessions.size >= 6) hlsEnd(hlsSessions.keys().next().value); // oldest first
+  const token = crypto.randomBytes(16).toString('hex');
+  const dir = path.join(HLS_DIR, token);
+  mkdirSync(dir, { recursive: true });
+  const args = ['-hide_banner', '-loglevel', 'error'];
+  entry.formats.forEach((_, i) => {
+    if (t) args.push('-ss', String(i === 0 ? t + SEEK_NUDGE : t));
+    args.push('-probesize', '500000', '-analyzeduration', '500000', '-i', `http://${LOOP}:${PORT}/raw/${id}/${i}?q=${h}`);
+  });
+  args.push('-c', 'copy', '-map', '0:v:0', '-map', `${entry.formats.length - 1}:a:0`,
+    '-f', 'hls', '-hls_time', '4', '-hls_list_size', '0', '-hls_playlist_type', 'event', '-hls_segment_type', 'fmp4',
+    '-hls_fmp4_init_filename', 'init.mp4', '-hls_flags', 'independent_segments', '-hls_segment_filename', 'seg%d.m4s', 'index.m3u8');
+  const ff = spawn(FFMPEG, args, { env, cwd: dir, windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
+  let err = '';
+  ff.stderr.on('data', d => { err += d; });
+  ff.on('close', code => { if (code && code !== 255 && hlsSessions.has(token)) console.error(`ffmpeg hls ${id}: exit ${code} ${err.trim().split('\n').pop()}`); });
+  const sess = { dir, ff, last: Date.now() };
+  hlsSessions.set(token, sess);
+  res.on('close', () => { sess.last = Date.now(); });
+  // answer once the first segment is listed, so the player never sees an empty playlist
+  const playlist = path.join(dir, 'index.m3u8');
+  for (let i = 0; i < 100; i++) {
+    if (ff.exitCode !== null && !existsSync(playlist)) break;
+    try { if (readFileSync(playlist, 'utf8').includes('.m4s')) return res.json({ url: `/hls/${token}/index.m3u8`, start: t }); } catch { /* not written yet */ }
+    await new Promise(r => setTimeout(r, 200));
+  }
+  hlsEnd(token);
+  throw new Error(err.trim().split('\n').pop() || 'ffmpeg produced no HLS output');
+}));
+
+app.get('/hls/:token/:file', (req, res) => {
+  const sess = hlsSessions.get(req.params.token);
+  if (!sess || !HLS_FILE.test(req.params.file)) return res.status(404).end();
+  sess.last = Date.now();
+  const f = req.params.file;
+  res.set({ 'Cache-Control': 'no-store', 'Content-Type': f.endsWith('.m3u8') ? 'application/vnd.apple.mpegurl' : 'video/mp4' });
+  res.sendFile(path.join(sess.dir, f), { headers: {}, cacheControl: false }, err => { if (err && !res.headersSent) res.status(404).end(); });
+});
 
 /* ---------- subtitles ---------- */
 // yt-dlp downloads the track as WebVTT; we turn it into clean cues the page renders itself.
