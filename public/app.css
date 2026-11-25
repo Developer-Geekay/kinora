@@ -551,3 +551,36 @@ body[data-route="network"] .page { max-width: 1180px; }
 .ncard .nct { padding: 8px 2px 0; }
 .nfoot { margin: 18px 4px 8px; color: var(--on-surface-var); font-size: 12px; }
 @media (max-width: 700px) { .locs-grid { grid-template-columns: 1fr; } .ngrid { grid-template-columns: repeat(2, 1fr); } .nfind { max-width: none; } }
+
+
+/* ---------- phone shell: bottom bar (Home, Shorts, Music, More) + slide-in side menu, like the Android app ---------- */
+.menubtn, .ri-more, .scrim, .drawer { display: none; }
+@media (max-width: 800px) {
+  .ri-x { display: none; }
+  .ri-more { display: flex; }
+  .ri { background: none; border: 0; font: inherit; font-size: 12px; line-height: 16px; letter-spacing: .1px; gap: 4px; padding: 8px 0 10px; color: var(--on-surface-var); cursor: pointer; }
+  .ri svg.i { width: 24px; height: 24px; box-sizing: content-box; padding: 4px 20px; border-radius: 16px; transition: background .2s var(--ease); }
+  .ri.on { background: none; color: var(--on-surface); font-weight: 600; }
+  .ri.on svg.i { background: var(--secondary-container); color: var(--on-secondary-container); }
+  .rail { height: 72px; border-top: 0; padding-bottom: env(safe-area-inset-bottom); box-shadow: 0 -1px 0 var(--outline-var); }
+  .rail .ri { padding-bottom: 8px; }
+  body:not([data-route="watch"]) main { padding-bottom: 96px; }
+  .fab, body:not([data-route="watch"]) .fab { bottom: 88px; }
+  .menubtn { display: inline-grid; flex: none; color: var(--on-surface); }
+  .scrim { display: block; position: fixed; inset: 0; z-index: 80; background: rgba(0,0,0,.5); opacity: 0; transition: opacity .25s var(--ease); }
+  .scrim[hidden] { display: none; }
+  .scrim.open { opacity: 1; }
+  .drawer { display: flex; flex-direction: column; position: fixed; z-index: 81; top: 0; bottom: 0; left: 0; width: min(320px, 84vw); background: var(--sc-low, var(--surface)); border-radius: 0 28px 28px 0; padding: 12px 12px calc(12px + env(safe-area-inset-bottom)); transform: translateX(-102%); transition: transform .28s var(--ease); visibility: hidden; overflow-y: auto; }
+  .drawer.open { transform: none; visibility: visible; box-shadow: 0 0 40px rgba(0,0,0,.5); }
+  .dhead { display: flex; align-items: center; gap: 12px; padding: 16px 12px 20px; }
+  .dlogo { width: 36px; height: 36px; border-radius: 11px; background: var(--primary); display: grid; place-items: center; }
+  .dlogo svg { width: 18px; height: 18px; fill: var(--on-primary, #fff); margin-left: 2px; }
+  .dname { font: 600 22px/28px var(--font); letter-spacing: -.2px; }
+  .dnav hr { border: 0; border-top: 1px solid var(--outline-var); margin: 8px 12px; }
+  .di { display: flex; align-items: center; gap: 12px; height: 56px; padding: 0 16px; border-radius: 28px; color: var(--on-surface-var); font: 500 15px/20px var(--font); }
+  .di svg.i { width: 24px; height: 24px; flex: none; }
+  .di.on { background: var(--secondary-container); color: var(--on-secondary-container); }
+  body[data-route="watch"] .menubtn { display: none; }
+}
+@media (max-width: 600px) { .appbar { padding-left: 4px; } }
+@media (prefers-reduced-motion: reduce) { .drawer, .scrim { transition: none; } }

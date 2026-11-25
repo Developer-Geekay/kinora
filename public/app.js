@@ -172,6 +172,26 @@ const watchPath = id => `/watch?v=${id}` + (queue.source?.type === 'playlist' ? 
 function openVideo(item) { stash(item); nav(`/watch?v=${item.id}`); }
 addEventListener('hashchange', route);
 
+/* phone side menu: opened by the hamburger or the bottom bar's More; closes on scrim, Escape, a left swipe or navigation */
+const drawerEl = $('#drawer'), scrimEl = $('#scrim');
+function openDrawer() {
+  scrimEl.hidden = false; drawerEl.setAttribute('aria-hidden', 'false'); $('#menuBtn').setAttribute('aria-expanded', 'true');
+  requestAnimationFrame(() => { scrimEl.classList.add('open'); drawerEl.classList.add('open'); });
+  const first = drawerEl.querySelector('.di.on') || drawerEl.querySelector('.di'); if (first) first.focus({ preventScroll: true });
+}
+function closeDrawer() {
+  if (!drawerEl.classList.contains('open')) return;
+  drawerEl.classList.remove('open'); scrimEl.classList.remove('open'); drawerEl.setAttribute('aria-hidden', 'true'); $('#menuBtn').setAttribute('aria-expanded', 'false');
+  setTimeout(() => { if (!drawerEl.classList.contains('open')) scrimEl.hidden = true; }, 260);
+}
+$('#menuBtn').addEventListener('click', openDrawer);
+$('#moreBtn').addEventListener('click', openDrawer);
+scrimEl.addEventListener('click', closeDrawer);
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDrawer(); });
+{ let x0 = null; drawerEl.addEventListener('touchstart', e => { x0 = e.touches[0].clientX; }, { passive: true });
+  drawerEl.addEventListener('touchend', e => { if (x0 !== null && e.changedTouches[0].clientX - x0 < -60) closeDrawer(); x0 = null; }, { passive: true }); }
+matchMedia('(min-width: 801px)').addEventListener('change', e => { if (e.matches) closeDrawer(); });
+
 function route() {
   const { parts, p } = parseHash();
   const name = parts[0] || 'home';
@@ -180,7 +200,8 @@ function route() {
   if (name !== 'network') closeLocalPlayer();
   document.body.dataset.route = ['home', 'results', 'watch', 'history', 'playlists', 'playlist', 'shorts', 'music', 'favorites', 'settings', 'network'].includes(name) ? name : 'home';
   $('#navHistory').classList.toggle('active', name === 'history');
-  document.querySelectorAll('#rail .ri[data-r]').forEach(a => a.classList.toggle('on', a.dataset.r === (name === 'playlist' ? 'playlists' : document.body.dataset.route)));
+  document.querySelectorAll('#rail .ri[data-r], #drawer .di[data-r]').forEach(a => a.classList.toggle('on', a.dataset.r === (name === 'playlist' ? 'playlists' : document.body.dataset.route)));
+  closeDrawer();
   $('#navPlaylists').classList.toggle('active', name === 'playlists' || name === 'playlist');
   updateMini();
   refreshFn = null;

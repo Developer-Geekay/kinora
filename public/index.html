@@ -71,10 +71,13 @@
   <symbol id="i-library" viewBox="0 0 24 24"><path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-8 12.5v-9l6 4.5-6 4.5z"/></symbol>
   <symbol id="i-expand" viewBox="0 0 24 24"><path d="M21 11V3h-8l3.29 3.29-10 10L3 13v8h8l-3.29-3.29 10-10z"/></symbol>
   <symbol id="i-edit" viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a.996.996 0 0 0 0-1.41l-2.34-2.34a.996.996 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></symbol>
+  <symbol id="i-menu" viewBox="0 0 24 24"><path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/></symbol>
+  <symbol id="i-morehz" viewBox="0 0 24 24"><path d="M6 10c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm12 0c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm-6 0c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></symbol>
   <symbol id="i-home" viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></symbol>
 </svg>
 
 <header class="appbar">
+  <button class="ib menubtn" id="menuBtn" aria-label="Open menu" aria-controls="drawer" aria-expanded="false"><svg class="i"><use href="#i-menu"/></svg></button>
   <a class="brand" href="#/" aria-label="Kinora home">Kin<b>ora</b></a>
   <form class="searchbar" id="searchForm" role="search" autocomplete="off">
     <svg class="i"><use href="#i-search"/></svg>
@@ -94,11 +97,28 @@
   <a class="ri" data-r="shorts" href="#/shorts"><svg class="i"><use href="#i-shorts"/></svg><span>Shorts</span></a>
   <a class="ri" data-r="music" href="#/music"><svg class="i"><use href="#i-music"/></svg><span>Music</span></a>
   <a class="ri" id="railNetwork" data-r="network" href="#/network" hidden><svg class="i"><use href="#i-network"/></svg><span>Network</span></a>
-  <a class="ri" data-r="playlists" href="#/playlists"><svg class="i"><use href="#i-library"/></svg><span>Playlists</span></a>
-  <a class="ri" data-r="history" href="#/history"><svg class="i"><use href="#i-history"/></svg><span>History</span></a>
-  <a class="ri" data-r="favorites" href="#/favorites"><svg class="i"><use href="#i-heart"/></svg><span>Favorites</span></a>
-  <a class="ri" data-r="settings" href="#/settings"><svg class="i"><use href="#i-settings"/></svg><span>Settings</span></a>
+  <a class="ri ri-x" data-r="playlists" href="#/playlists"><svg class="i"><use href="#i-library"/></svg><span>Playlists</span></a>
+  <a class="ri ri-x" data-r="history" href="#/history"><svg class="i"><use href="#i-history"/></svg><span>History</span></a>
+  <a class="ri ri-x" data-r="favorites" href="#/favorites"><svg class="i"><use href="#i-heart"/></svg><span>Favorites</span></a>
+  <a class="ri ri-x" data-r="settings" href="#/settings"><svg class="i"><use href="#i-settings"/></svg><span>Settings</span></a>
+  <button class="ri ri-more" id="moreBtn" type="button" aria-label="More" aria-controls="drawer"><svg class="i"><use href="#i-morehz"/></svg><span>More</span></button>
 </nav>
+
+<div class="scrim" id="scrim" hidden></div>
+<aside class="drawer" id="drawer" aria-label="Menu" aria-hidden="true">
+  <div class="dhead"><span class="dlogo"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4v16l13-8z"/></svg></span><span class="dname">Kinora</span></div>
+  <nav class="dnav">
+    <a class="di" data-r="home" href="#/"><svg class="i"><use href="#i-home"/></svg><span>Home</span></a>
+    <a class="di" data-r="shorts" href="#/shorts"><svg class="i"><use href="#i-shorts"/></svg><span>Shorts</span></a>
+    <a class="di" data-r="music" href="#/music"><svg class="i"><use href="#i-music"/></svg><span>Music</span></a>
+    <hr>
+    <a class="di" data-r="playlists" href="#/playlists"><svg class="i"><use href="#i-library"/></svg><span>Playlists</span></a>
+    <a class="di" data-r="history" href="#/history"><svg class="i"><use href="#i-history"/></svg><span>History</span></a>
+    <a class="di" data-r="favorites" href="#/favorites"><svg class="i"><use href="#i-heart"/></svg><span>Favorites</span></a>
+    <hr>
+    <a class="di" data-r="settings" href="#/settings"><svg class="i"><use href="#i-settings"/></svg><span>Settings</span></a>
+  </nav>
+</aside>
 
 <main>
   <section id="watch" class="watch no-side" aria-label="Player">
