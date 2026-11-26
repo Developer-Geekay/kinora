@@ -176,7 +176,7 @@ app.use((req, res, next) => {
   if (isLoopback(ip)) return next();
   if (!LAN) return res.status(403).end();
   if (req.path === '/login' && req.method === 'POST') return next();
-  if (req.method === 'GET' && hlsSession(req.path)) return next(); // an HLS playlist/segment: the random id in the path is the key
+  if ((req.method === 'GET' || req.method === 'HEAD') && hlsSession(req.path)) return next(); // an HLS playlist/segment: the random id in the path is the key
 
   const lock = failures.get(ip);
   if (lock && lock.until > Date.now()) return res.status(429).send('Too many wrong PINs. Try again in a few minutes.');
@@ -587,6 +587,7 @@ setInterval(() => { for (const [t, s] of hlsSessions) if (Date.now() - s.last > 
 
 app.get('/api/hls/:id', guard(async (req, res) => {
   const id = req.params.id, h = heightOf(req);
+  console.log(`hls: ${req.socket.remoteAddress} ${id} ${(req.get('user-agent') || '').replace(/^Mozilla\/5.0 /, '').slice(0, 90)}`);
   const entry = await resolveStream(id, 'video', h);
   if (entry.live) return res.json({ url: null }); // live streams already come as HLS from the source; not handled for iOS yet
   const t = await keyframeAt(id, h, Math.max(0, Number(req.query.t) || 0));
@@ -622,8 +623,9 @@ app.get('/api/hls/:id', guard(async (req, res) => {
 
 app.get('/hls/:token/:file', (req, res) => {
   const sess = hlsSessions.get(req.params.token);
-  if (!sess || !HLS_FILE.test(req.params.file)) return res.status(404).end();
+  if (!sess || !HLS_FILE.test(req.params.file)) { console.log(`hls: 404 ${req.params.file} from ${req.socket.remoteAddress}`); return res.status(404).end(); }
   sess.last = Date.now();
+  if (/^(index\.m3u8|init\.mp4|seg0\.m4s)$/.test(req.params.file) && !sess.seen?.has(req.params.file)) { (sess.seen ||= new Set()).add(req.params.file); console.log(`hls: ${req.socket.remoteAddress} fetched ${req.params.file}`); }
   const f = req.params.file;
   res.set({ 'Cache-Control': 'no-store', 'Content-Type': f.endsWith('.m3u8') ? 'application/vnd.apple.mpegurl' : 'video/mp4' });
   res.sendFile(path.join(sess.dir, f), { headers: {}, cacheControl: false }, err => { if (err && !res.headersSent) res.status(404).end(); });

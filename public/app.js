@@ -281,9 +281,13 @@ async function load(start, play = true) {
   if (audio || !IOS) v.src = `/stream/${id}?mode=${mode()}&q=${eff('quality')}` + (at ? `&t=${at}` : '');
   else {
     if (play) setState('loading');
-    const u = await videoUrl(id, eff('quality'), at);
+    let u;
+    try { u = await videoUrl(id, eff('quality'), at); }
+    catch (e) { if (seq === loadSeq && current?.id === id) setState('error', `Couldn’t prepare the video for this device (${e.message}).`); return; }
     if (seq !== loadSeq || current?.id !== id) return;
     v.src = u;
+    // Safari gives no error when it just never starts: say what state it is stuck in
+    setTimeout(() => { if (seq === loadSeq && current?.id === id && stage.dataset.state === 'loading' && v.readyState < 3) setState('error', `Safari did not start the video (readyState ${v.readyState}, network ${v.networkState}${v.error ? ', error ' + v.error.code : ''}).`); }, 20000);
   }
   v.defaultPlaybackRate = rate; v.playbackRate = rate;
   if (audio && start) v.addEventListener('loadedmetadata', () => { v.currentTime = start; }, { once: true });
@@ -295,11 +299,10 @@ const IOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform ==
 async function videoUrl(id, q, at = 0) {
   const plain = `/stream/${id}?mode=video&q=${q}` + (at ? `&t=${at}` : '');
   if (!IOS) return plain;
-  try {
-    const r = await fetch(`/api/hls/${id}?q=${q}` + (at ? `&t=${at}` : ''));
-    const j = await r.json();
-    return j.url || plain;
-  } catch { return plain; }
+  const r = await fetch(`/api/hls/${id}?q=${q}` + (at ? `&t=${at}` : ''));
+  if (!r.ok) throw new Error((await r.text().catch(() => '')).slice(0, 200) || `HTTP ${r.status}`);
+  const j = await r.json();
+  return j.url || plain; // no url = a live stream, which already comes as HLS
 }
 
 // Pre-resolve the next queue item (the slow yt-dlp step) shortly before the current one ends, so it starts at once.
@@ -416,7 +419,7 @@ v.addEventListener('playing', () => {
 });
 v.addEventListener('waiting', () => { if (current && stage.dataset.state !== 'error') { setState('loading'); $('#loadmsg').textContent = 'Buffering…'; } });
 v.addEventListener('pause', () => { if (!v.ended && stage.dataset.state === 'playing') setState('paused'); });
-v.addEventListener('error', () => { if (v.getAttribute('src')) setState('error', 'The stream stopped. The link may have expired or the video may be unavailable.'); });
+v.addEventListener('error', () => { if (v.getAttribute('src')) setState('error', 'The stream stopped. The link may have expired or the video may be unavailable.' + (v.error ? ` (player error ${v.error.code}${v.error.message ? ': ' + v.error.message : ''}${IOS ? ', HLS' : ''})` : '')); });
 v.addEventListener('ended', () => {
   if (current) { delete posMap[current.id]; store.set('pos', posMap); markDone(current.id); }
   if (eff('autoplay') && queue.i + 1 < queue.items.length) next(); else setState('paused');
@@ -1147,7 +1150,7 @@ function openShortsFeed(startId) {
     side.append(fav);
     col.append(vid, spin, err, info, side, prog); s.append(col);
     let attached = false;
-    s.warm = () => { if (!attached) { attached = true; videoUrl(it.id, 1080).then(u => { if (attached) vid.src = u; }); } }; // height cap: a 1080p Short is 608x1080
+    s.warm = () => { if (!attached) { attached = true; videoUrl(it.id, 1080).then(u => { if (attached) vid.src = u; }, () => { s.classList.remove('loading'); s.classList.add('err'); }); } }; // height cap: a 1080p Short is 608x1080
     s.play = () => { if (vid.ended) { attached = false; vid.removeAttribute('src'); } s.warm(); s.classList.remove('err'); vid.muted = st.muted; vid.play().catch(() => {}); };
     s.release = () => { vid.pause(); if (attached) { attached = false; vid.removeAttribute('src'); vid.load(); } s.classList.remove('loading'); };
     s.pause = () => vid.pause();
