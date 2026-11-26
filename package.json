@@ -1,5 +1,5 @@
 {
-  "name": "localtube",
+  "name": "kinora",
   "version": "0.1.0",
   "private": true,
   "description": "Local-only YouTube player backed by a project-local yt-dlp",

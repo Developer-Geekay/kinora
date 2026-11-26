@@ -13,7 +13,7 @@ to solve YouTube's challenges). To rebuild it, download the latest of each from 
 
 `npm run lan` also serves your home network (private addresses only, with a PIN shown at startup and kept in
 `.cache/pin.txt`) so the Android app can connect. `npm start` stays PC-only. The app is in `android/`, and the
-built `LocalTube.apk` is in this folder. See `android/README.md`. Other devices that open the address in a browser
+built `Kinora.apk` is in this folder. See `android/README.md`. Other devices that open the address in a browser
 get a PIN page, then the same web player.
 
 ## Pages (hash routes, so Back/Forward work)

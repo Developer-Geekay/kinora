@@ -1,5 +1,5 @@
 #!/bin/sh
-# Sets up LocalTube on Ubuntu / Debian (x86_64 or arm64, e.g. a Raspberry Pi). Run it from this folder:
+# Sets up Kinora on Ubuntu / Debian (x86_64 or arm64, e.g. a Raspberry Pi). Run it from this folder:
 #   sh install.sh              install ffmpeg, yt-dlp, deno and the Node packages (only what is missing)
 #   sh install.sh --service    ...and also start it at boot (systemd), as the current user
 # Downloads yt-dlp and deno from their official GitHub releases into ./bin unless they are already there. Safe to run again.
@@ -21,7 +21,7 @@ need=$(echo "$need" | sed 's/\bnode\b/nodejs npm/')
 if [ -n "$need" ]; then $SUDO apt-get update && $SUDO apt-get install -y $need; fi
 NODE_MAJOR=$(node -p 'process.versions.node.split(".")[0]')
 if [ "$NODE_MAJOR" -lt 20 ]; then
-  echo "Node.js $NODE_MAJOR is too old: LocalTube needs 20 or newer (see https://nodejs.org or use nvm)."; exit 1
+  echo "Node.js $NODE_MAJOR is too old: Kinora needs 20 or newer (see https://nodejs.org or use nvm)."; exit 1
 fi
 
 mkdir -p bin
@@ -50,10 +50,15 @@ chmod +x start.sh install.sh 2>/dev/null || true
 if [ "$1" = "--service" ]; then
   say "systemd service"
   me=$(id -un); here=$(pwd); node_bin=$(command -v node)
-  sed -e "s|__USER__|$me|g" -e "s|__DIR__|$here|g" -e "s|__NODE__|$node_bin|g" localtube.service | $SUDO tee /etc/systemd/system/localtube.service >/dev/null
+  # the service was called "localtube" before the rename: remove it, or it keeps port 3000
+  if [ -f /etc/systemd/system/localtube.service ]; then
+    $SUDO systemctl disable --now localtube || true
+    $SUDO rm -f /etc/systemd/system/localtube.service
+  fi
+  sed -e "s|__USER__|$me|g" -e "s|__DIR__|$here|g" -e "s|__NODE__|$node_bin|g" kinora.service | $SUDO tee /etc/systemd/system/kinora.service >/dev/null
   $SUDO systemctl daemon-reload
-  $SUDO systemctl enable --now localtube
-  echo "Running as a service. Logs:  journalctl -u localtube -f"
+  $SUDO systemctl enable --now kinora
+  echo "Running as a service. Logs:  journalctl -u kinora -f"
 fi
 
 say "Done"

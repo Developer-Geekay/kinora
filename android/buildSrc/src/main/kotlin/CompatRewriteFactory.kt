@@ -10,7 +10,7 @@ import org.objectweb.asm.Opcodes
  * NewPipeExtractor is built for newer Java than old Android has. Some of the Java methods it calls don't exist before Android 13
  * (API 33) and are not covered by the Android Gradle Plugin's desugaring. On a phone with Android 7 (a Fire TV Stick, say) they
  * crash the app the first time they run. This rewrites those calls, inside NewPipeExtractor only, to the same-named functions in
- * `app.localtube.compat.Compat`, which use methods that every Android version has.
+ * `app.kinora.compat.Compat`, which use methods that every Android version has.
  *
  * To support another method: add it to [REWRITES] and to `Compat`.
  */
@@ -33,7 +33,7 @@ abstract class CompatRewriteFactory : AsmClassVisitorFactory<InstrumentationPara
         }
 
     private companion object {
-        const val COMPAT = "app/localtube/compat/Compat"
+        const val COMPAT = "app/kinora/compat/Compat"
         const val CS = "(Ljava/lang/String;Ljava/nio/charset/Charset;)Ljava/lang/String;"
         val REWRITES = mapOf(
             "java/net/URLEncoder.encode$CS" to "urlEncode", // Java 10, Android 13+

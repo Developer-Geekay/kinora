@@ -157,7 +157,7 @@ function readOrCreatePin() {
   return pin;
 }
 const PIN = LAN ? readOrCreatePin() : null;
-const COOKIE_TOKEN = PIN && crypto.createHmac('sha256', PIN).update('localtube-web-login').digest('hex');
+const COOKIE_TOKEN = PIN && crypto.createHmac('sha256', PIN).update('kinora-web-login').digest('hex');
 const failures = new Map(); // ip -> { n, until }
 const cookies = req => Object.fromEntries((req.headers.cookie || '').split(';').map(c => c.trim().split(/=(.*)/s)).filter(p => p[0]));
 

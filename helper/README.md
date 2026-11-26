@@ -12,7 +12,7 @@ seeking works. Files never go through the Kinora server.
 
 1. Run it on the computer where you open the web page, telling it the portal's address:
 
-       localtube-helper.exe --origin http://192.168.1.20:3000
+       kinora-helper.exe --origin http://192.168.1.20:3000
 
    (`http://localhost:3000` and `http://127.0.0.1:3000` are always allowed. If the portal is served over HTTPS, give that address.)
 2. It prints a **pairing code**. In the web page open **Network → Find on the network**, and type the code once.
@@ -21,7 +21,7 @@ seeking works. Files never go through the Kinora server.
 Options: `--origin <url>` (repeat for more portals), `--port <n>` (default 47821), `--demo <folder>` (serve a local folder as a
 pretend server, to try the page without a real share).
 
-The pairing code is kept in `%APPDATA%\LocalTubeHelper\pairing-code.txt` (`~/.config/LocalTubeHelper/` elsewhere). Delete that
+The pairing code is kept in `%APPDATA%\KinoraHelper\pairing-code.txt` (`~/.config/KinoraHelper/` elsewhere). Delete that
 file to get a new one.
 
 ## Safety
@@ -34,7 +34,7 @@ file to get a new one.
 
 Needs Rust. Project-local cargo home, so nothing is written to `~/.cargo`:
 
-    set CARGO_HOME=d:\Work\LocalTube\helper-tools\cargo-home
+    set CARGO_HOME=d:\Work\Kinora\helper-tools\cargo-home
     cargo build --release
 
-The result is `target\release\localtube-helper.exe`; a copy is in `dist\`. Uses the pure-Rust `smb` crate (SMB 2/3, NTLM/Kerberos).
+The result is `target\release\kinora-helper.exe`; a copy is in `dist\`. Uses the pure-Rust `smb` crate (SMB 2/3, NTLM/Kerberos).

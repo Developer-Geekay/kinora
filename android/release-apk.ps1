@@ -37,11 +37,11 @@ if ($DebugKey) {
         $pw = ([Convert]::ToBase64String($bytes) -replace '[^A-Za-z0-9]', 'x')
         Remove-Item $ks -ErrorAction SilentlyContinue      # a leftover from an interrupted run
         $oldPref = $ErrorActionPreference; $ErrorActionPreference = 'Continue'   # keytool reports progress on stderr
-        & (Join-Path $env:JAVA_HOME 'bin\keytool.exe') -genkeypair -keystore $ks -alias localtube -keyalg RSA -keysize 2048 -validity 10000 `
-            -storepass $pw -keypass $pw -dname 'CN=LocalTube, O=LocalTube' 2>&1 | Out-Null
+        & (Join-Path $env:JAVA_HOME 'bin\keytool.exe') -genkeypair -keystore $ks -alias kinora -keyalg RSA -keysize 2048 -validity 10000 `
+            -storepass $pw -keypass $pw -dname 'CN=Kinora, O=Kinora' 2>&1 | Out-Null
         $ErrorActionPreference = $oldPref
         if (-not (Test-Path $ks)) { throw 'keytool did not create the keystore' }
-        Set-Content $props -Encoding ascii -Value "storeFile=release.keystore`nstorePassword=$pw`nkeyAlias=localtube`nkeyPassword=$pw"
+        Set-Content $props -Encoding ascii -Value "storeFile=release.keystore`nstorePassword=$pw`nkeyAlias=kinora`nkeyPassword=$pw"
     }
 }
 
@@ -59,16 +59,16 @@ if ((Get-Item $apk).LastWriteTime -lt (Get-Date).AddMinutes(-30)) { throw 'The A
 $apksigner = Get-ChildItem (Join-Path $env:ANDROID_SDK_ROOT 'build-tools') -Directory | Sort-Object Name -Descending | ForEach-Object { Join-Path $_.FullName 'apksigner.bat' } | Where-Object { Test-Path $_ } | Select-Object -First 1
 if ($apksigner) { & $apksigner verify --print-certs $apk | Select-Object -First 3 | ForEach-Object { "  $_" } }
 
-Copy-Item $apk (Join-Path $rel 'mobile\LocalTube-mobile.apk')
-Copy-Item $apk (Join-Path $rel 'tv\LocalTube-tv.apk')
+Copy-Item $apk (Join-Path $rel 'mobile\Kinora-mobile.apk')
+Copy-Item $apk (Join-Path $rel 'tv\Kinora-tv.apk')
 
 Set-Content (Join-Path $rel 'mobile\INSTALL.txt') -Encoding ascii -Value (Fill @'
 Kinora for Android phones and tablets - version @@VERSION@@, built @@STAMP@@
 
 Install
-  1. Copy LocalTube-mobile.apk to the phone (USB, cloud drive, or messaging) and open it. Allow "install unknown apps"
+  1. Copy Kinora-mobile.apk to the phone (USB, cloud drive, or messaging) and open it. Allow "install unknown apps"
      for the app you opened it from when Android asks.
-  2. Or from a computer with adb:   adb install -r LocalTube-mobile.apk      (wireless: adb pair, then adb connect)
+  2. Or from a computer with adb:   adb install -r Kinora-mobile.apk      (wireless: adb pair, then adb connect)
 
 Updating
   An APK only installs over an existing install if it is signed with the same key. A build made with the release key
@@ -88,8 +88,8 @@ D-pad navigation, on its own. Settings -> Appearance -> Layout can force TV or P
 Install (pick one)
   * adb:  enable developer options and network debugging on the TV, then
           adb connect <tv-address>:5555
-          adb install -r LocalTube-tv.apk
-  * Files: put LocalTube-tv.apk on a USB stick or cloud drive and open it with a file manager app on the TV
+          adb install -r Kinora-tv.apk
+  * Files: put Kinora-tv.apk on a USB stick or cloud drive and open it with a file manager app on the TV
           (allow installs from unknown sources when asked).
   * Fire TV: the "Downloader" app can fetch the APK from a link you host.
 

@@ -10,7 +10,7 @@ helper/target/
 helper/dist/
 release/
 product-page/
-LocalTube.apk
+Kinora.apk
 *.apk
 *.keystore
 *.jks

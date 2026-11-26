@@ -12,6 +12,6 @@ try {
     & $gradle --no-daemon --console=plain assembleDebug @args
     if ($LASTEXITCODE -ne 0) { throw "Gradle failed ($LASTEXITCODE)" }
     $apk = Join-Path $PSScriptRoot 'app\build\outputs\apk\debug\app-debug.apk'
-    Copy-Item $apk (Join-Path $PSScriptRoot '..\LocalTube.apk') -Force
-    "APK: $(Resolve-Path (Join-Path $PSScriptRoot '..\LocalTube.apk'))  ($([math]::Round((Get-Item $apk).Length/1MB,1)) MB)"
+    Copy-Item $apk (Join-Path $PSScriptRoot '..\Kinora.apk') -Force
+    "APK: $(Resolve-Path (Join-Path $PSScriptRoot '..\Kinora.apk'))  ($([math]::Round((Get-Item $apk).Length/1MB,1)) MB)"
 } finally { Pop-Location }

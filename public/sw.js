@@ -1,4 +1,4 @@
-// LocalTube service worker: keeps the app shell so the installed app opens at once (and offline, minus the videos).
+// Kinora service worker: keeps the app shell so the installed app opens at once (and offline, minus the videos).
 // API calls and video streams always go to the network and are never stored.
 const V = 'lt-shell-v1';
 const SHELL = ['/', '/app.css', '/app.js', '/manifest.webmanifest', '/icons/icon-192.png', '/icons/icon-512.png'];

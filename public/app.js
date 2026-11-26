@@ -1683,7 +1683,7 @@ function viewNetwork() {
         if (!smb.hosts.length) g2.append(el('p', 'note', 'No computer with file sharing turned on was found on this network.'));
       } else if (smb.stage === 'error') g2.append(el('p', 'note nwarn', smb.msg));
       else if (helperUp === false) {
-        const box = el('div', 'nsetup'), cmd = `localtube-helper.exe --origin ${location.origin}`;
+        const box = el('div', 'nsetup'), cmd = `kinora-helper.exe --origin ${location.origin}`;
         box.append(el('h3', '', 'Searching the network needs the Kinora helper'),
           el('p', 'note', 'A browser can’t talk to file shares by itself, so a small program on this computer does it. Start it with the command below, then check again.'));
         const code = el('code', 'ncode', cmd); box.append(code);

@@ -6,7 +6,7 @@ notification with lock-screen and Bluetooth controls, and Material You colors.
 
 ## Use it
 
-Copy `LocalTube.apk` to the phone and install it (allow "install unknown apps" for your file manager or browser). Open it.
+Copy `Kinora.apk` to the phone and install it (allow "install unknown apps" for your file manager or browser). Open it.
 That's all: search and play.
 
 ### Optional: use your PC instead
@@ -14,7 +14,7 @@ That's all: search and play.
 Settings > Videos come from > **My PC**. The PC server (yt-dlp + ffmpeg) can do 1440p/4K, and is the fallback if YouTube
 changes something and the phone's lookup stops working until the app is updated.
 
-1. On the PC, in the LocalTube folder: `npm run lan`
+1. On the PC, in the Kinora folder: `npm run lan`
    It prints the PC's addresses and a 6-digit PIN (also kept in `.cache/pin.txt`).
    The first time, Windows asks whether Node may use the network: choose **Private networks**.
 2. In the app, enter the address (for example `192.168.100.178:3000`) and the PIN, tap **Connect**.
@@ -53,7 +53,7 @@ is untested (YouTube serves those as VP9, which needs a capable decoder; the loo
     powershell -NoProfile -ExecutionPolicy Bypass -File android\build-apk.ps1
 
 Uses the toolchain in `android-tools\` (JDK 17, Gradle 8.7, Android SDK 34, and Gradle's cache), all inside the project.
-The APK is copied to `LocalTube.apk`. You can also open the `android` folder in Android Studio.
+The APK is copied to `Kinora.apk`. You can also open the `android` folder in Android Studio.
 
 ## Safety
 

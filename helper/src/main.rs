@@ -1,6 +1,6 @@
-//! LocalTube helper: lets the LocalTube web page browse and play files from SMB shares on THIS computer's network.
+//! Kinora helper: lets the Kinora web page browse and play files from SMB shares on THIS computer's network.
 //!
-//! A browser can't speak SMB, and the LocalTube server may sit on another network. This small program runs on the client's side,
+//! A browser can't speak SMB, and the Kinora server may sit on another network. This small program runs on the client's side,
 //! finds SMB hosts on the local network, signs in with the credentials you type into the web page, and serves folder listings
 //! and file bytes (with HTTP Range, so seeking works) to the page over plain HTTP on 127.0.0.1.
 //!
@@ -62,7 +62,7 @@ fn token_path() -> PathBuf {
     let base = std::env::var_os("APPDATA").or_else(|| std::env::var_os("XDG_CONFIG_HOME")).map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
         .unwrap_or_else(|| PathBuf::from("."));
-    base.join("LocalTubeHelper").join("pairing-code.txt")
+    base.join("KinoraHelper").join("pairing-code.txt")
 }
 
 /// The pairing code is made once and kept, so the browser only has to be paired the first time.
@@ -90,7 +90,7 @@ async fn main() {
             "--origin" => if let Some(o) = args.next() { origins.push(o.trim_end_matches('/').to_string()) },
             "--demo" => demo = args.next().map(PathBuf::from),
             "-h" | "--help" => {
-                println!("LocalTube helper {VERSION}\n\nUsage: localtube-helper [--origin <portal address>]... [--port <n>] [--demo <folder>]\n\n  --origin  address of the LocalTube portal that may use this helper, e.g. http://192.168.1.20:3000 (repeatable)\n  --port    port to listen on (default {DEFAULT_PORT})\n  --demo    serve a local folder as a pretend SMB server, to try the web page without a real share");
+                println!("Kinora helper {VERSION}\n\nUsage: kinora-helper [--origin <portal address>]... [--port <n>] [--demo <folder>]\n\n  --origin  address of the Kinora portal that may use this helper, e.g. http://192.168.1.20:3000 (repeatable)\n  --port    port to listen on (default {DEFAULT_PORT})\n  --demo    serve a local folder as a pretend SMB server, to try the web page without a real share");
                 return;
             }
             other => eprintln!("ignoring unknown option {other}"),
@@ -124,9 +124,9 @@ async fn main() {
         Ok(l) => l,
         Err(e) => { eprintln!("Can't listen on {addr}: {e}. Is the helper already running?"); return; }
     };
-    println!("LocalTube helper {VERSION} is running on http://{addr}");
+    println!("Kinora helper {VERSION} is running on http://{addr}");
     println!("Pairing code: {token}");
-    println!("In the LocalTube web page: Network > Find on the network, then type that code once.");
+    println!("In the Kinora web page: Network > Find on the network, then type that code once.");
     println!("Allowed portals: {}", origins.join(", "));
     if let Some(d) = &app.demo { println!("DEMO MODE: serving {} as the pretend host \"demo\"", d.display()); }
     axum::serve(listener, router).await.unwrap();
@@ -152,7 +152,7 @@ async fn guard(State(app): State<Shared>, req: Request<Body>, next: Next) -> Res
 
 #[derive(Serialize)]
 struct Ping { app: &'static str, version: &'static str, demo: bool }
-async fn ping(State(app): State<Shared>) -> Json<Ping> { Json(Ping { app: "localtube-helper", version: VERSION, demo: app.demo.is_some() }) }
+async fn ping(State(app): State<Shared>) -> Json<Ping> { Json(Ping { app: "kinora-helper", version: VERSION, demo: app.demo.is_some() }) }
 
 // ---------------------------------------------------------------- /discover: who answers on the SMB port nearby?
 

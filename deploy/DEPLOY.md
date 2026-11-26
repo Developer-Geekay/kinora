@@ -1,14 +1,14 @@
-# Deploying the LocalTube web portal
+# Deploying the Kinora web portal
 
 Version @@VERSION@@, built @@STAMP@@. This folder is the whole portal: copy it to the machine that will host it.
 It runs on Windows, and on Linux (Ubuntu / Debian, x86_64 or arm64 such as a Raspberry Pi).
 (Written on a Windows PC and not yet run on a Linux host: if a step fails there, the message from `install.sh` says which.)
 
 ## Ubuntu / Debian server (quick way)
-    mkdir localtube && tar xzf LocalTube-web.tar.gz -C localtube     # or: unzip LocalTube-web.zip -d localtube
-    cd localtube
+    mkdir kinora && tar xzf Kinora-web.tar.gz -C kinora     # or: unzip Kinora-web.zip -d kinora
+    cd kinora
     sh install.sh --service       # installs ffmpeg + Node if missing, downloads yt-dlp and deno into bin/ if they are not
-                                  # already there, runs npm ci, and starts LocalTube at boot as the current user
+                                  # already there, runs npm ci, and starts Kinora at boot as the current user
 Leave out `--service` to run it by hand with `sh start.sh`. `install.sh` uses sudo only for apt and the service, and
 installs only what is missing: ffmpeg and Node already on the machine are left alone. If `bin/` already holds `yt-dlp`
 and `deno` for this CPU (a release built with them bundled), nothing is downloaded for them.
@@ -29,13 +29,13 @@ Put `yt-dlp.exe`, `ffmpeg.exe` and `deno.exe` in `bin\`, run `npm ci --omit=dev`
 ## Running
 `sh start.sh` is `LAN=1 node server.js`. Open `http://<host-address>:3000` from a device on the same network. The first
 start prints a **PIN** (kept in `.cache/pin.txt`, or set `LT_PIN`); the web page asks for it once. Only private network
-addresses are accepted. Without `LAN=1` it listens on 127.0.0.1 only. With the service: `systemctl status localtube`,
-`journalctl -u localtube -f`. If a firewall is on: `sudo ufw allow 3000/tcp`.
+addresses are accepted. Without `LAN=1` it listens on 127.0.0.1 only. With the service: `systemctl status kinora`,
+`journalctl -u kinora -f`. If a firewall is on: `sudo ufw allow 3000/tcp`.
 Settings through environment variables: `PORT`, `MAX_HEIGHT` (default 720), `READ_AHEAD`, `OUT_BUFFER_MB`, `LT_PIN`.
 
 ## Updating
 YouTube changes often; when playback starts failing run `bin/yt-dlp -U` (or download the new binary again), then
-`sudo systemctl restart localtube`. To update LocalTube itself, unpack the new release over the folder (`.cache/` keeps
+`sudo systemctl restart kinora`. To update Kinora itself, unpack the new release over the folder (`.cache/` keeps
 the PIN) and run `sh install.sh` again.
 
 ## Phones and TVs
@@ -49,4 +49,4 @@ but cannot be installed; put the host behind HTTPS (for example a reverse proxy 
 ## Network page (files on the client's own network)
 The "Network" page plays files from a folder or mapped drive on the computer you browse from, and, with the small helper
 program in `helper/` running on that computer, from SMB shares on its network. See `helper/README.md`.
-Start it with the address you open the portal on: `localtube-helper.exe --origin http://<host-address>:3000`.
+Start it with the address you open the portal on: `kinora-helper.exe --origin http://<host-address>:3000`.

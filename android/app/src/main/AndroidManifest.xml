@@ -19,7 +19,7 @@
         android:banner="@drawable/tv_banner"
         android:label="Kinora"
         android:supportsRtl="true"
-        android:theme="@style/Theme.LocalTube"
+        android:theme="@style/Theme.Kinora"
         android:usesCleartextTraffic="true">
 
         <activity

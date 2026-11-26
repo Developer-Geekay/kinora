@@ -59,7 +59,7 @@ fs.mkdirSync(path.join(web, 'bin'));
 put(path.join(web, 'bin', 'README.txt'), fill(read('deploy/bin-README.txt')));
 put(path.join(web, 'start.sh'), fill(read('deploy/start.sh')), 0o755);
 put(path.join(web, 'install.sh'), fill(read('deploy/install.sh')), 0o755);
-put(path.join(web, 'localtube.service'), fill(read('deploy/localtube.service')));
+put(path.join(web, 'kinora.service'), fill(read('deploy/kinora.service')));
 put(path.join(web, 'DEPLOY.md'), fill(read('deploy/DEPLOY.md')));
 
 // ARM64 Linux yt-dlp and deno, if they are in bin/ (bin/yt-dlp_linux_aarch64 and bin/deno): shipped as bin/yt-dlp and bin/deno
@@ -74,20 +74,20 @@ if (!flag('no-linux-tools')) {
 }
 
 // the helper (the small program that lets the Network page reach SMB shares on the client's network)
-const helperExe = path.join(root, 'helper', 'dist', 'localtube-helper.exe');
+const helperExe = path.join(root, 'helper', 'dist', 'kinora-helper.exe');
 if (flag('rebuild-helper')) {
   step('Rebuilding the helper');
   const env = { ...process.env, CARGO_HOME: path.join(root, 'helper-tools', 'cargo-home') };
   env.PATH = `${path.join(process.env.USERPROFILE || '', '.cargo', 'bin')}${path.delimiter}${env.PATH}`;
   if (!run('cargo', ['build', '--release'], { cwd: path.join(root, 'helper'), env, shell: win })) throw new Error('cargo build failed');
   fs.mkdirSync(path.dirname(helperExe), { recursive: true });
-  fs.copyFileSync(path.join(root, 'helper', 'target', 'release', 'localtube-helper.exe'), helperExe);
+  fs.copyFileSync(path.join(root, 'helper', 'target', 'release', 'kinora-helper.exe'), helperExe);
 }
 if (fs.existsSync(helperExe)) {
   fs.mkdirSync(path.join(web, 'helper'));
-  fs.copyFileSync(helperExe, path.join(web, 'helper', 'localtube-helper.exe'));
+  fs.copyFileSync(helperExe, path.join(web, 'helper', 'kinora-helper.exe'));
   fs.copyFileSync(path.join(root, 'helper', 'README.md'), path.join(web, 'helper', 'README.md'));
-} else warn('helper/dist/localtube-helper.exe not found: the helper is left out (use --rebuild-helper on Windows).');
+} else warn('helper/dist/kinora-helper.exe not found: the helper is left out (use --rebuild-helper on Windows).');
 
 // ---------- Android (Windows only) ----------
 let apkInfo = 'skipped';
@@ -101,10 +101,10 @@ if (wantAndroid) {
 
 // ---------- archives + checksums ----------
 step('Packaging');
-const tgz = path.join(rel, 'LocalTube-web.tar.gz');
+const tgz = path.join(rel, 'Kinora-web.tar.gz');
 // relative paths from release/: GNU tar (Git Bash on Windows) reads "C:\..." as a remote host name
-if (!run('tar', ['-czf', 'LocalTube-web.tar.gz', '-C', 'web', '.'], { cwd: rel, stdio: 'pipe' })) { fs.rmSync(tgz, { force: true }); warn('tar not available: no .tar.gz.'); }
-const zip = path.join(rel, 'LocalTube-web.zip');
+if (!run('tar', ['-czf', 'Kinora-web.tar.gz', '-C', 'web', '.'], { cwd: rel, stdio: 'pipe' })) { fs.rmSync(tgz, { force: true }); warn('tar not available: no .tar.gz.'); }
+const zip = path.join(rel, 'Kinora-web.zip');
 const zipped = win
   ? run('powershell', ['-NoProfile', '-Command', `Compress-Archive -Path '${web}\\*' -DestinationPath '${zip}' -Force`], { stdio: 'pipe' })
   : run('zip', ['-qr', zip, '.'], { cwd: web, stdio: 'pipe' });
@@ -130,4 +130,4 @@ console.log(`\nDone. Version ${version} (${stamp}). Android: ${apkInfo}. Linux t
     console.log(`  ${path.relative(rel, p).split(path.sep).join('/')}   ${(fs.statSync(p).size / 1048576).toFixed(1)} MB`);
   }
 })(rel);
-console.log('  (web/public/ and the rest of the web files are in release/web, archived as release/LocalTube-web.tar.gz and .zip)');
+console.log('  (web/public/ and the rest of the web files are in release/web, archived as release/Kinora-web.tar.gz and .zip)');

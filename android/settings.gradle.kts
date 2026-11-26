@@ -9,5 +9,5 @@ dependencyResolutionManagement {
         maven("https://jitpack.io") { content { includeGroup("com.github.TeamNewPipe"); includeGroup("com.github.TeamNewPipe.NewPipeExtractor") } }
     }
 }
-rootProject.name = "LocalTube"
+rootProject.name = "Kinora"
 include(":app")

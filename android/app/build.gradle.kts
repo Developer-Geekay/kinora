@@ -16,11 +16,11 @@ androidComponents {
 }
 
 android {
-    namespace = "app.localtube"
+    namespace = "app.kinora"
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "app.localtube"
+        applicationId = "app.kinora"
         minSdk = 24
         targetSdk = 34
         // the release script passes these; plain debug builds keep 1 / "1.0"

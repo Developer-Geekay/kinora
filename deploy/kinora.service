@@ -1,0 +1,18 @@
+# systemd unit template. `sh install.sh --service` fills in the three __NAME__ values and installs it; by hand:
+# replace them, copy to /etc/systemd/system/kinora.service, then
+#   sudo systemctl daemon-reload && sudo systemctl enable --now kinora
+[Unit]
+Description=Kinora
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=__USER__
+WorkingDirectory=__DIR__
+Environment=LAN=1
+Environment=PATH=__DIR__/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=__NODE__ server.js
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
