@@ -9,6 +9,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.material3.FilterChip
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.horizontalScroll
@@ -20,6 +21,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.ui.draw.alpha
+import kotlinx.coroutines.delay
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -119,7 +124,25 @@ private fun ServerList(state: NetworkState, entry: FocusRequester?) {
     var found by remember { mutableStateOf<List<String>?>(null) }
     LaunchedEffect(Unit) { if (state.restoreFocus) { state.restoreFocus = false; if (entry != null) runCatching { entry.requestFocus() } } }
 
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = 12.dp, bottom = 24.dp)) {
+    // TV: a dialog that closes (or a removed server) would leave the remote's focus on the side menu. Put it back in the
+    // list: on the server just saved, else on the button the dialog was opened from.
+    val list = rememberLazyListState()
+    val target = remember { FocusRequester() }
+    val addBtn = remember { FocusRequester() }
+    val findBtn = remember { FocusRequester() }
+    var focusOn by remember { mutableStateOf<String?>(null) } // a server's id, ADD or FIND
+    LaunchedEffect(focusOn) {
+        val want = focusOn ?: return@LaunchedEffect
+        if (entry != null) {
+            val row = servers.indexOfFirst { it.id == want }
+            if (row >= 0) list.scrollToItem(row) // the row above stays in view
+            delay(250) // after the closing dialog has handed the focus back to the screen
+            runCatching { when (want) { ADD -> addBtn; FIND -> findBtn; else -> target }.requestFocus() }
+        }
+        focusOn = null
+    }
+
+    LazyColumn(Modifier.fillMaxSize(), state = list, contentPadding = PaddingValues(top = 12.dp, bottom = 24.dp)) {
         item {
             Text("Network", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(24.dp, 16.dp, 24.dp, 4.dp))
             Text(
@@ -136,33 +159,43 @@ private fun ServerList(state: NetworkState, entry: FocusRequester?) {
                 trailingContent = {
                     Row {
                         IconButton({ editing = sv }) { Icon(Icons.Filled.Edit, "Edit ${sv.name}") }
-                        IconButton({ app.smb.forget(sv.id); app.store.removeSmbServer(sv.id) }) { Icon(Icons.Filled.Delete, "Remove ${sv.name}") }
+                        IconButton({
+                            val next = servers.getOrNull(i + 1) ?: servers.getOrNull(i - 1)
+                            app.smb.forget(sv.id); app.store.removeSmbServer(sv.id)
+                            focusOn = next?.id ?: ADD
+                        }) { Icon(Icons.Filled.Delete, "Remove ${sv.name}") }
                     }
                 },
-                modifier = Modifier.entryIf(i == 0, entry).focusRing().clickable { state.open(sv) },
+                modifier = Modifier.entryIf(i == 0, entry).then(if (sv.id == focusOn) Modifier.focusRequester(target) else Modifier).focusRing().clickable { state.open(sv) },
             )
         }
         item {
             Row(Modifier.padding(24.dp, 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                Button({ adding = "" }, Modifier.entryIf(servers.isEmpty(), entry).focusRing(PillShape)) { Text("Add server") }
+                Button({ adding = "" }, Modifier.entryIf(servers.isEmpty(), entry).focusRequester(addBtn).focusRing(PillShape)) { Text("Add server") }
+                // stays enabled while looking (a disabled button would drop the remote's focus); a second press does nothing
                 OutlinedButton(
                     {
-                        scanning = true; found = null
-                        scope.launch { found = LanScan.findSmbHosts(); scanning = false }
+                        if (!scanning) {
+                            scanning = true; found = null
+                            scope.launch { found = LanScan.findSmbHosts(); scanning = false }
+                        }
                     },
-                    Modifier.focusRing(PillShape),
-                    enabled = !scanning,
+                    Modifier.focusRequester(findBtn).focusRing(PillShape),
                 ) {
-                    if (scanning) CircularProgressIndicator(Modifier.width(18.dp), strokeWidth = 2.dp) else Icon(Icons.Filled.Search, null)
-                    Text(if (scanning) "  Looking…" else "  Find servers on my network")
+                    Box(Modifier.size(18.dp), Alignment.Center) {
+                        if (scanning) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp) else Icon(Icons.Filled.Search, null, Modifier.size(18.dp))
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    Text(if (scanning) "Looking…" else "Find network")
                 }
             }
         }
     }
 
     found?.let { hosts ->
+        val close = { found = null; focusOn = FIND }
         AlertDialog(
-            onDismissRequest = { found = null },
+            onDismissRequest = close,
             title = { Text(if (hosts.isEmpty()) "No servers found" else "Servers on your network") },
             text = {
                 if (hosts.isEmpty()) Text("Nothing answered on the SMB port. Check that file sharing is on and that this device is on the same Wi-Fi or network, or add the address by hand.")
@@ -177,15 +210,18 @@ private fun ServerList(state: NetworkState, entry: FocusRequester?) {
                     }
                 }
             },
-            confirmButton = { TextButton({ found = null }) { Text("Close") } },
+            confirmButton = { TextButton(close) { Text("Close") } },
         )
     }
-    adding?.let { host -> ServerDialog(initial = null, prefillHost = host, onDismiss = { adding = null }) }
-    editing?.let { sv -> ServerDialog(initial = sv, prefillHost = "", onDismiss = { editing = null }) }
+    adding?.let { host -> ServerDialog(initial = null, prefillHost = host, onDismiss = { saved -> adding = null; focusOn = saved ?: ADD }) }
+    editing?.let { sv -> ServerDialog(initial = sv, prefillHost = "", onDismiss = { saved -> editing = null; focusOn = saved ?: sv.id }) }
 }
 
+private const val ADD = "add"
+private const val FIND = "find"
+
 @Composable
-private fun ServerDialog(initial: SmbServer?, prefillHost: String, onDismiss: () -> Unit) {
+private fun ServerDialog(initial: SmbServer?, prefillHost: String, onDismiss: (savedId: String?) -> Unit) {
     val app = LocalContext.current.tubeApp
     val scope = rememberCoroutineScope()
     var name by remember { mutableStateOf(initial?.name ?: "") }
@@ -203,12 +239,13 @@ private fun ServerDialog(initial: SmbServer?, prefillHost: String, onDismiss: ()
             id = initial?.id ?: "s" + System.currentTimeMillis().toString(36),
             name = name.trim().ifBlank { h }, host = h, user = user.trim(), password = password, domain = domain.trim(),
         )
+        if (busy) return
         busy = true
         val retry = error != null // after one failure the next press saves anyway (the computer may just be off right now)
         scope.launch {
             try {
                 if (!retry) app.smb.test(server)
-                app.smb.forget(server.id); app.store.saveSmbServer(server); onDismiss()
+                app.smb.forget(server.id); app.store.saveSmbServer(server); onDismiss(server.id)
             } catch (e: ApiError) {
                 error = e.message + " Press Save again to keep it anyway."
             }
@@ -217,10 +254,12 @@ private fun ServerDialog(initial: SmbServer?, prefillHost: String, onDismiss: ()
     }
 
     AlertDialog(
-        onDismissRequest = { if (!busy) onDismiss() },
+        onDismissRequest = { if (!busy) onDismiss(null) },
         title = { Text(if (initial == null) "Add a server" else "Edit server") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                // above the fields: under them it was cut off on a TV, where the form fills the whole height
+                error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
                 OutlinedTextField(host, { host = it; error = null }, label = { Text("Address") }, placeholder = { Text("192.168.1.20 or NAS") }, singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Next), modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(name, { name = it }, label = { Text("Name (optional)") }, singleLine = true,
@@ -232,13 +271,18 @@ private fun ServerDialog(initial: SmbServer?, prefillHost: String, onDismiss: ()
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Next), modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(domain, { domain = it }, label = { Text("Domain / workgroup (optional)") }, singleLine = true,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done), modifier = Modifier.fillMaxWidth())
-                error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
             }
         },
         confirmButton = {
-            Button(::save, enabled = !busy) { if (busy) CircularProgressIndicator(Modifier.width(18.dp), strokeWidth = 2.dp) else Text("Save") }
+            // the spinner sits where the label was, so the button keeps its size while connecting
+            Button(::save, Modifier.focusRing(PillShape)) {
+                Box(contentAlignment = Alignment.Center) {
+                    Text("Save", Modifier.alpha(if (busy) 0f else 1f))
+                    if (busy) CircularProgressIndicator(Modifier.size(18.dp), color = MaterialTheme.colorScheme.onPrimary, strokeWidth = 2.dp)
+                }
+            }
         },
-        dismissButton = { TextButton({ onDismiss() }, enabled = !busy) { Text("Cancel") } },
+        dismissButton = { TextButton({ onDismiss(null) }, enabled = !busy) { Text("Cancel") } },
     )
 }
 

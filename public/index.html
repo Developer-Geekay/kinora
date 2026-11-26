@@ -61,6 +61,10 @@
   <symbol id="i-cc" viewBox="0 0 24 24"><path d="M19 4H5c-1.11 0-2 .9-2 2v12c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm-8 7H9.5v-.5h-2v3h2V13H11v1c0 .55-.45 1-1 1H7c-.55 0-1-.45-1-1v-4c0-.55.45-1 1-1h3c.55 0 1 .45 1 1v1zm7 0h-1.5v-.5h-2v3h2V13H18v1c0 .55-.45 1-1 1h-3c-.55 0-1-.45-1-1v-4c0-.55.45-1 1-1h3c.55 0 1 .45 1 1v1z"/></symbol>
   <symbol id="i-audio" viewBox="0 0 24 24"><path d="M12 1a9 9 0 0 0-9 9v7c0 1.66 1.34 3 3 3h3v-8H5v-2c0-3.87 3.13-7 7-7s7 3.13 7 7v2h-4v8h3c1.66 0 3-1.34 3-3v-7a9 9 0 0 0-9-9z"/></symbol>
   <symbol id="i-video" viewBox="0 0 24 24"><path d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 24 24"><path d="M10 6 8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></symbol>
+  <symbol id="i-hd" viewBox="0 0 24 24"><path d="M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2zm-8 12H9.5v-2h-2v2H6V9h1.5v2.5h2V9H11v6zm2-6h4c.55 0 1 .45 1 1v4c0 .55-.45 1-1 1h-4V9zm1.5 4.5h2v-3h-2v3z"/></symbol>
+  <symbol id="i-speed" viewBox="0 0 24 24"><path d="m20.38 8.57-1.23 1.85a8 8 0 0 1-.22 7.58H5.07A8 8 0 0 1 15.58 6.85l1.85-1.23A10 10 0 0 0 3.35 19a2 2 0 0 0 1.72 1h13.85a2 2 0 0 0 1.74-1 10 10 0 0 0-.27-10.44zm-9.79 6.84a2 2 0 0 0 2.83 0l5.66-8.49-8.49 5.66a2 2 0 0 0 0 2.83z"/></symbol>
+  <symbol id="i-autoplay" viewBox="0 0 24 24"><path d="M4 10h12v2H4zm0-4h12v2H4zm0 8h8v2H4zm10 0v6l5-3z"/></symbol>
   <symbol id="i-check" viewBox="0 0 24 24"><path d="M9 16.17 4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></symbol>
   <symbol id="i-verified" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></symbol>
   <symbol id="i-back" viewBox="0 0 24 24"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></symbol>
@@ -129,7 +133,6 @@
         <div class="idle"></div>
 
         <div class="center"><span class="spinner"></span></div>
-        <div class="center"><button class="bigplay" id="bigplay" aria-label="Play"><svg class="i"><use href="#i-play"/></svg></button></div>
         <div class="loadmsg" id="loadmsg">Finding the stream…</div>
         <div class="caps" id="caps"><span></span></div>
 
@@ -139,24 +142,34 @@
           <div class="row" style="gap:8px"><button class="btn filled has-icon" id="retry"><svg class="i"><use href="#i-retry"/></svg>Try again</button><button class="btn tonal" id="errNext">Skip</button></div>
         </div>
 
-        <div class="controls" id="controls">
-          <div class="seek" id="seekWrap">
-            <div class="track"></div><div class="knob"></div><div class="tip" id="tip">0:00</div>
-            <input id="seek" type="range" min="0" max="0" step="1" value="0" aria-label="Seek">
+        <div class="chrome" id="chrome">
+          <div class="ctop">
+            <button class="cb" data-c="close" aria-label="Close player (Esc)" title="Close (Esc)" hidden><svg class="i"><use href="#i-back"/></svg></button>
+            <div class="ctitle"><strong data-c="title"></strong><span data-c="sub"></span></div>
+            <div class="cend" data-c="topend"></div>
           </div>
-          <div class="row">
-            <button class="cb" id="prevBtn" aria-label="Previous (P)"><svg class="i"><use href="#i-prev"/></svg></button>
-            <button class="cb" id="pp" aria-label="Play / pause (space)"><svg class="i" id="ppi"><use href="#i-play"/></svg></button>
-            <button class="cb" id="nextBtn" aria-label="Next (N)"><svg class="i"><use href="#i-next"/></svg></button>
-            <button class="cb txt skip" id="back" aria-label="Back 10 seconds (J)">−10</button>
-            <button class="cb txt skip" id="fwd" aria-label="Forward 10 seconds (L)">+10</button>
-            <span class="vol"><button class="cb" id="mute" aria-label="Mute (M)"><svg class="i" id="vi"><use href="#i-vol"/></svg></button><input id="vol" type="range" min="0" max="1" step="0.05" value="1" aria-label="Volume"></span>
-            <span class="time" id="time">0:00 / 0:00</span>
-            <span class="grow"></span>
-            <button class="cb" id="ccBtn" aria-label="Subtitles (C)" aria-pressed="false" title="Subtitles (C)"><svg class="i"><use href="#i-cc"/></svg></button>
-            <button class="cb dot" id="gear" aria-label="Playback options" title="Playback options"><svg class="i"><use href="#i-tune"/></svg></button>
-            <button class="cb" id="thBtn" aria-label="Theater mode (T)" title="Theater mode (T)"><svg class="i" id="thi"><use href="#i-theater"/></svg></button>
-            <button class="cb" id="fs" aria-label="Full screen (F)" title="Full screen (F)"><svg class="i"><use href="#i-full"/></svg></button>
+          <div class="cmid">
+            <button class="mb" data-c="midprev" id="midPrev" aria-label="Previous"><svg class="i"><use href="#i-prev"/></svg></button>
+            <button class="mb big" data-c="midpp" id="midPP" aria-label="Play / pause"><svg class="i"><use href="#i-play"/></svg></button>
+            <button class="mb" data-c="midnext" id="midNext" aria-label="Next"><svg class="i"><use href="#i-next"/></svg></button>
+          </div>
+          <div class="controls" id="controls">
+            <div class="seek" data-c="seekwrap" id="seekWrap">
+              <div class="track"></div><div class="knob"></div><div class="tip" data-c="tip" id="tip">0:00</div>
+              <input data-c="seek" id="seek" type="range" min="0" max="0" step="1" value="0" aria-label="Seek">
+            </div>
+            <div class="row">
+              <button class="cb wide" data-c="prev" id="prevBtn" aria-label="Previous (P)" title="Previous (P)"><svg class="i"><use href="#i-prev"/></svg></button>
+              <button class="cb wide" data-c="pp" id="pp" aria-label="Play / pause (space)"><svg class="i" id="ppi"><use href="#i-play"/></svg></button>
+              <button class="cb wide" data-c="next" id="nextBtn" aria-label="Next (N)" title="Next (N)"><svg class="i"><use href="#i-next"/></svg></button>
+              <span class="vol"><button class="cb" data-c="mute" id="mute" aria-label="Mute (M)" title="Mute (M)"><svg class="i" id="vi"><use href="#i-vol"/></svg></button><input data-c="vol" id="vol" type="range" min="0" max="1" step="0.05" value="1" aria-label="Volume"></span>
+              <span class="time" data-c="time" id="time">0:00 / 0:00</span>
+              <span class="grow"></span>
+              <span class="cright"><button class="cb" data-c="cc" id="ccBtn" aria-label="Captions (C)" aria-pressed="false" title="Captions (C)"><svg class="i"><use href="#i-cc"/></svg></button><button class="cb gear" data-c="gear" id="gear" aria-label="Settings" title="Settings"><svg class="i"><use href="#i-settings"/></svg></button></span>
+              <button class="cb" data-c="list" aria-label="Files in this folder" title="Files in this folder" hidden><svg class="i"><use href="#i-queue"/></svg></button>
+              <button class="cb wide" data-c="theater" id="thBtn" aria-label="Theater mode (T)" title="Theater mode (T)"><svg class="i" id="thi"><use href="#i-theater"/></svg></button>
+              <button class="cb" data-c="fs" id="fs" aria-label="Full screen (F)" title="Full screen (F)"><svg class="i"><use href="#i-full"/></svg></button>
+            </div>
           </div>
         </div>
 

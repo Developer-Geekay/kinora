@@ -32,12 +32,13 @@ Leaving the watch page keeps the video playing in a mini player (bottom-right) w
 
 - **Settings** (gear): global defaults for theme, stream type, quality, player view (normal / theater),
   subtitles, autoplay, and whether watch history is saved.
-- **Playback options** (tune button on the player): override stream, quality, view, speed, subtitles and
+- **Player settings** (gear on the player; the web, phone and TV players share the same design and menu): override stream, quality, view, speed, subtitles and
   autoplay for what you are watching now. Overrides last until Reset or a page reload and never change your defaults.
 - **View**: normal, theater (`T`) or full screen (`F`).
 - **Subtitles** (`C`): uploaded and auto-generated tracks. Drawn by the page, so they follow seeking and also show in audio-only mode.
 - **Queue**: add or play-next from any item's menu, drag to reorder (or Move up/down), save as a playlist.
 - **History**: recorded when a video starts playing. Resume positions are separate and survive Clear history.
+- On a touch screen: tap shows the controls, double-tap a side skips 10 s.
 - Shortcuts: `/` search, `Space` play, `J`/`L` ±10s, arrows ±5s / volume, `M` mute, `F` fullscreen,
   `T` theater, `C` subtitles, `A` audio only, `N`/`P` next/previous.
 

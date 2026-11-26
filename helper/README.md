@@ -15,7 +15,7 @@ seeking works. Files never go through the Kinora server.
        kinora-helper.exe --origin http://192.168.1.20:3000
 
    (`http://localhost:3000` and `http://127.0.0.1:3000` are always allowed. If the portal is served over HTTPS, give that address.)
-2. It prints a **pairing code**. In the web page open **Network → Find on the network**, and type the code once.
+2. It prints a **pairing code**. In the web page open **Network → Find network**, and type the code once.
 3. Pick a computer, sign in (blank user name = guest), pick a share, and play.
 
 Options: `--origin <url>` (repeat for more portals), `--port <n>` (default 47821), `--demo <folder>` (serve a local folder as a

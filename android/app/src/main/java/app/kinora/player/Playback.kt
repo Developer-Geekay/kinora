@@ -54,6 +54,8 @@ class Playback(private val app: TubeApp) {
     private var lastPlay: Pair<List<Video>, Int>? = null
     private var seekTarget = -1L // where the user just sought to, until the player has actually got there
     private var seekAt = 0L
+    private var suspended = false // a TV left the app: the queue is kept, the player has let go of its streams
+    private var lengthOf: Pair<String, Long>? = null // the last length known for an item (id, ms)
 
     var player: Player? by mutableStateOf(null); private set
     var queue by mutableStateOf<List<Video>>(emptyList()); private set
@@ -173,8 +175,13 @@ class Playback(private val app: TubeApp) {
     }
 
     /** The player's duration, or the video's own length while the player is between streams (else the seek bar's range collapses to 0). */
-    private fun knownDuration(p: Player): Long =
-        p.duration.takeIf { it > 0 } ?: ((current?.duration ?: 0L) * 1000)
+    private fun knownDuration(p: Player): Long {
+        val id = p.currentMediaItem?.mediaId ?: return 0
+        val ms = p.duration.takeIf { it > 0 } ?: ((current?.duration ?: 0L) * 1000)
+        if (ms > 0) { lengthOf = id to ms; return ms }
+        // files on a share carry no length of their own: keep what the player said before it was stopped
+        return lengthOf?.takeIf { it.first == id }?.second ?: 0
+    }
 
     // ----- audio and subtitle tracks (what is inside the file: languages, 5.1, embedded or .srt next to it) -----
 
@@ -332,13 +339,49 @@ class Playback(private val app: TubeApp) {
     /** Repeat the current item (the Shorts feed loops a clip until you swipe). */
     fun setLoop(on: Boolean) = withController { it.repeatMode = if (on) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF }
 
-    fun toggle() = withController { if (it.isPlaying) it.pause() else { if (it.playbackState == Player.STATE_ENDED) it.seekTo(0); it.play() } }
+    fun toggle() = withController { if (it.isPlaying) it.pause() else resume(it) }
+
+    /** Play, whatever state the player was left in: finished, stopped (a TV that went to sleep) or failed. */
+    private fun resume(c: MediaController) {
+        if (c.mediaItemCount == 0) return
+        when (c.playbackState) {
+            Player.STATE_IDLE -> if (error != null) retry() else { reopen(c); c.play() }
+            Player.STATE_ENDED -> { c.seekTo(0); c.play() }
+            else -> c.play()
+        }
+    }
+
+    /** Open the current stream again where it was left. */
+    private fun reopen(c: MediaController) {
+        suspended = false
+        c.seekTo(c.currentPosition) // the PC's video pipe can't seek: this asks for a new stream starting here
+        c.prepare()
+    }
     fun next() = withController { if (it.hasNextMediaItem()) it.seekToNextMediaItem() }
     fun previous() = withController { if (it.currentPosition > 5000 || !it.hasPreviousMediaItem()) it.seekTo(0) else it.seekToPreviousMediaItem() }
     fun seek(ms: Long) = withController { positionMs = ms; seekTarget = ms; seekAt = System.currentTimeMillis(); it.seekTo(ms) }
     fun changeSpeed(s: Float) = withController { it.setPlaybackSpeed(s) }
 
-    /** Leaving the app on a TV: remember where you were, then stop (a TV has no lock screen or notification to control it from). */
+    /**
+     * The TV left the app (Home, another app, or the screensaver): stop playing and let go of the network, but keep the
+     * queue and the position, so the player still works on the way back. [restore] opens the stream again.
+     */
+    fun suspendForExit() = withController { c ->
+        if (starting) { queueBatch++; starting = false } // a lookup still running must not start playing in the background
+        if (c.mediaItemCount == 0) return@withController
+        saveResume(c, force = true)
+        c.pause()
+        c.stop() // keeps the items and the position
+        suspended = true
+    }
+
+    /** Back on screen after [suspend]: show the picture again, still paused. */
+    fun restore() = withController { c ->
+        if (suspended && c.mediaItemCount > 0 && c.playbackState == Player.STATE_IDLE) { c.pause(); reopen(c) }
+        suspended = false
+    }
+
+    /** Closing the player on a TV: remember where you were, then stop (a TV has no lock screen or notification to control it from). */
     fun stopForExit() = withController { c ->
         if (c.mediaItemCount > 0) saveResume(c, force = true)
         queueBatch++

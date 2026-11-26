@@ -6,7 +6,6 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.BaseDataSource
 import androidx.media3.datasource.DataSpec
 import app.kinora.TubeApp
-import jcifs.smb.SmbException
 import jcifs.smb.SmbFile
 import jcifs.smb.SmbRandomAccessFile
 import java.io.IOException
@@ -18,6 +17,7 @@ import java.io.IOException
 @UnstableApi
 class SmbDataSource(private val app: TubeApp) : BaseDataSource(/* isNetwork = */ true) {
     private var uri: Uri? = null
+    private var serverId: String? = null
     private var file: SmbRandomAccessFile? = null
     private var remaining = 0L
     private val chunk = ByteArray(CHUNK)
@@ -31,18 +31,28 @@ class SmbDataSource(private val app: TubeApp) : BaseDataSource(/* isNetwork = */
         transferInitializing(dataSpec)
         val server = u.userInfo?.let { app.smb.server(it) } ?: throw IOException("That server was removed.")
         val path = (u.path ?: "").trim('/')
-        try {
+        fun openOnce() {
             val ctx = app.smb.context(server)
             val url = app.smb.url(server, path, dir = false)
             val length = SmbFile(url, ctx).length()
             val raf = SmbRandomAccessFile(url, "r", 1 /* FILE_SHARE_READ */, ctx)
-            raf.seek(dataSpec.position)
             file = raf
+            raf.seek(dataSpec.position)
             remaining = if (dataSpec.length != C.LENGTH_UNSET.toLong()) dataSpec.length else (length - dataSpec.position).coerceAtLeast(0)
+        }
+        serverId = server.id
+        try {
+            try {
+                openOnce()
+            } catch (e: Exception) {
+                // after a long pause or a sleeping TV the old connection is often dead: try once more on a new one
+                android.util.Log.i("LT-smb", "reconnecting to ${server.host}: $e")
+                reset()
+                openOnce()
+            }
         } catch (e: Exception) {
             android.util.Log.w("LT-smb", "open failed for ${server.host}/$path: $e")
-            try { file?.close() } catch (_: Exception) {}
-            file = null
+            reset()
             throw (e as? IOException) ?: IOException("Can't open the file on the share: ${e.message}", e)
         }
         chunkPos = 0; chunkEnd = 0
@@ -56,7 +66,10 @@ class SmbDataSource(private val app: TubeApp) : BaseDataSource(/* isNetwork = */
         if (remaining == 0L) return C.RESULT_END_OF_INPUT
         if (chunkPos >= chunkEnd) {
             val raf = file ?: throw IOException("closed")
-            val n = try { raf.read(chunk, 0, minOf(CHUNK.toLong(), remaining).toInt()) } catch (e: SmbException) { throw IOException(e.message, e) }
+            val n = try { raf.read(chunk, 0, minOf(CHUNK.toLong(), remaining).toInt()) } catch (e: IOException) {
+                reset() // the player retries from here, on a new connection
+                throw e
+            }
             if (n < 0) return C.RESULT_END_OF_INPUT
             chunkPos = 0; chunkEnd = n
         }
@@ -66,6 +79,13 @@ class SmbDataSource(private val app: TubeApp) : BaseDataSource(/* isNetwork = */
         remaining -= n
         bytesTransferred(n)
         return n
+    }
+
+    /** Drop the open file and the server's connection, so the next open starts fresh. */
+    private fun reset() {
+        try { file?.close() } catch (_: Exception) {}
+        file = null
+        serverId?.let { app.smb.forget(it) }
     }
 
     override fun getUri(): Uri? = uri

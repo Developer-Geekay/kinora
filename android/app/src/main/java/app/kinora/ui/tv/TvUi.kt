@@ -190,6 +190,7 @@ fun TvRoot(onChangeServer: () -> Unit) {
     val railFocus = remember { List(RAIL_ITEMS.size + 1) { FocusRequester() } }
     var railHasFocus by remember { mutableStateOf(true) }
     var confirmExit by remember { mutableStateOf(false) }
+    var backToRail by remember { mutableStateOf(false) } // the exit question was cancelled
     val activity = LocalContext.current as? android.app.Activity
 
     val play: (List<Video>, Int) -> Unit = { videos, i -> pb.playQueue(videos, i); playerOpen = true }
@@ -197,6 +198,12 @@ fun TvRoot(onChangeServer: () -> Unit) {
     // Leaving the player on a TV: a video stops (you're done with the screen); audio keeps playing, with the mini player.
     val closePlayer = { if (!pb.audioPlaying) pb.stopForExit(); playerOpen = false }
     BackHandler(playerOpen) { closePlayer() }
+    // only once the question has left the screen: while it is up, it doesn't let the focus out
+    LaunchedEffect(backToRail) { if (backToRail) { delay(100); runCatching { railFocus[tab].requestFocus() }; backToRail = false } }
+    // never leave an empty player on screen (Android may have ended playback while the app was away)
+    LaunchedEffect(playerOpen, pb.hasMedia, pb.starting, pb.error) {
+        if (playerOpen && !pb.hasMedia && !pb.starting && pb.error == null) { delay(3000); playerOpen = false }
+    }
     // Back from inside a screen goes to the rail first (like most TV apps); Back on the rail leaves the app.
     BackHandler(!playerOpen && !railHasFocus) { runCatching { railFocus[tab].requestFocus() } }
     // Back on the rail would leave the app: ask first
@@ -251,7 +258,10 @@ fun TvRoot(onChangeServer: () -> Unit) {
                 }
             }
             saving?.let { SaveToPlaylistDialog(it) { saving = null } }
-            if (confirmExit) ExitConfirm(onStay = { confirmExit = false }, onExit = { confirmExit = false; activity?.finish() })
+            if (confirmExit) ExitConfirm(
+                onStay = { confirmExit = false; backToRail = true },
+                onExit = { confirmExit = false; activity?.finish() },
+            )
         }
     }
 }
@@ -453,40 +463,49 @@ private fun TvLibrary(entry: FocusRequester, onSave: (Video) -> Unit, goSearch: 
     }
 }
 
+/**
+ * "Exit Kinora?" over the whole screen. Drawn as part of the TV screen, not as a system dialog: a dialog window ignores
+ * the TV layout's scale (see [TvRoot]) and came out oversized.
+ */
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 private fun ExitConfirm(onStay: () -> Unit, onExit: () -> Unit) {
     val stay = remember { FocusRequester() }
-    val scheme = MaterialTheme.colorScheme
     LaunchedEffect(Unit) { runCatching { stay.requestFocus() } }
-    androidx.compose.ui.window.Dialog(onDismissRequest = onStay, properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
+    BackHandler(true) { onStay() }
+    Box(
+        Modifier.fillMaxSize().background(Color(0xCC000000))
+            .focusProperties { exit = { FocusRequester.Cancel } } // nothing underneath may take focus
+            .focusGroup(),
+        contentAlignment = Alignment.Center,
+    ) {
         Column(
-            Modifier.width(520.dp).clip(RoundedCornerShape(28.dp)).background(scheme.surfaceContainerHigh).padding(36.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            Modifier.width(420.dp).clip(RoundedCornerShape(20.dp)).background(Color(0xFF212121)).padding(horizontal = 32.dp, vertical = 28.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Text("Exit Kinora?", style = TvType.screen, color = scheme.onSurface)
-            Text("Playback stops when you leave.", style = TvType.cardTitle.copy(fontSize = 18.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Normal), color = scheme.onSurfaceVariant)
-            Row(Modifier.fillMaxWidth().padding(top = 24.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                DialogButton("Stay", Modifier.weight(1f).focusRequester(stay), onStay)
+            Text("Exit Kinora?", style = TvType.section, color = Color.White)
+            Text("Playback stops when you leave.", style = TvType.cardTitle.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Normal), color = Color(0xB3FFFFFF),
+                modifier = Modifier.padding(top = 8.dp))
+            Row(Modifier.fillMaxWidth().padding(top = 24.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                DialogButton("Cancel", Modifier.weight(1f).focusRequester(stay), onStay)
                 DialogButton("Exit", Modifier.weight(1f), onExit)
             }
         }
     }
 }
 
-/** Same focus language as the rail: the focused control fills with the accent, the others sit quietly on the surface. */
+/** The player's focus language: the focused pill is white with dark text, the other sits quietly on the card. */
 @Composable
 private fun DialogButton(text: String, modifier: Modifier, onClick: () -> Unit) {
     var focused by remember { mutableStateOf(false) }
-    val scheme = MaterialTheme.colorScheme
-    val scale by animateFloatAsState(if (focused) 1.04f else 1f, label = "dlgbtn")
     Box(
-        modifier.height(60.dp).graphicsLayer { scaleX = scale; scaleY = scale }
+        modifier.height(44.dp)
             .onFocusChanged { focused = it.hasFocus }
-            .clip(RoundedCornerShape(16.dp))
-            .background(if (focused) scheme.primary else scheme.surfaceContainerHighest)
+            .clip(RoundedCornerShape(50))
+            .background(if (focused) Color.White else Color(0x1FFFFFFF))
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
-    ) { Text(text, style = TvType.section.copy(fontSize = 20.sp), color = if (focused) scheme.onPrimary else scheme.onSurface) }
+    ) { Text(text, style = TvType.cardTitle, color = if (focused) Color(0xFF0F0F0F) else Color.White) }
 }
 
 private val VIDEO_LINK = Regex("(?:v=|youtu\\.be/|shorts/|embed/|live/)([\\w-]{11})")

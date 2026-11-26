@@ -47,18 +47,14 @@ const slim = it => ({ id: it.id, title: it.title || it.id, channel: it.channel |
 /* ================= settings: global defaults + per-player overrides ================= */
 const HEIGHTS = [360, 480, 720, 1080, 1440, 2160];
 const qLabel = h => (h === 2160 ? '4K' : h + 'p');
-const RATES = [0.75, 1, 1.25, 1.5, 2];
+const RATES = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
+const speedLabel = r => (r === 1 ? 'Normal' : `${r}×`);
 const DEFAULTS = { theme: 'system', stream: 'video', quality: 720, view: 'normal', autoplay: true, subs: false, history: true };
 let settings = { ...DEFAULTS, ...store.get('settings', {}) };
 let ov = {};                       // overrides for this player session (cleared by Reset or a page reload)
 let rate = store.get('rate', 1);
 const eff = k => ov[k] ?? settings[k];
 const mode = () => eff('stream');
-const LABEL = {
-  stream: x => (x === 'audio' ? 'Audio' : 'Video'), quality: qLabel, autoplay: x => (x ? 'On' : 'Off'),
-  view: x => (x === 'theater' ? 'Theater' : 'Normal'), subs: x => (x ? 'On' : 'Off'),
-};
-
 const mq = matchMedia('(prefers-color-scheme: light)');
 function applyTheme() {
   const t = settings.theme;
@@ -243,23 +239,19 @@ function enterWatch(p) {
 function updateMini() {
   document.body.dataset.mini = current && curRoute() !== 'watch' ? 'on' : 'off';
   $('#miniTitle').textContent = current?.title || '';
+  stage.querySelector('[data-c="title"]').textContent = current?.title || '';
+  stage.querySelector('[data-c="sub"]').textContent = current?.channel || '';
 }
 function setState(s, msg) {
   stage.dataset.state = s; document.body.dataset.state = s;
   if (s === 'error') $('#errMsg').textContent = msg || 'Something went wrong.';
-  const href = `#i-${s === 'playing' ? 'pause' : 'play'}`;
-  $('#ppi').firstChild.setAttribute('href', href); $('#miniPPi').firstChild.setAttribute('href', href);
+  const glyph = s === 'playing' ? 'pause' : 'play';
+  for (const b of [$('#pp'), $('#midPP'), $('#miniPP')]) setIcon(b, glyph);
   $('#pp').setAttribute('aria-label', s === 'playing' ? 'Pause (space)' : 'Play (space)');
   if ('mediaSession' in navigator) navigator.mediaSession.playbackState = s === 'playing' ? 'playing' : 'paused';
   wake();
 }
-function wake() {
-  stage.classList.remove('ui-hidden');
-  clearTimeout(hideTimer);
-  if (stage.dataset.state === 'playing' && pop.hidden) hideTimer = setTimeout(() => stage.classList.add('ui-hidden'), 2600);
-}
-stage.addEventListener('pointermove', wake);
-stage.addEventListener('pointerleave', () => { if (stage.dataset.state === 'playing' && pop.hidden) stage.classList.add('ui-hidden'); });
+const wake = () => ui.wake(); // the controls come back, and hide again by themselves while playing
 
 let loadSeq = 0;
 async function load(start, play = true) {
@@ -396,9 +388,9 @@ function render() {
   let b = 0;
   try { for (let i = 0; i < v.buffered.length; i++) if (v.buffered.start(i) <= v.currentTime + .5) b = Math.max(b, v.buffered.end(i)); } catch {}
   const pct = x => (duration ? Math.min(100, x / duration * 100) : 0) + '%';
-  seekWrap.style.setProperty('--p', pct(shown));
+  seekWrap.style.setProperty('--p', current?.live ? '100%' : pct(shown));
   seekWrap.style.setProperty('--b', pct(offset + b));
-  $('#time').textContent = current?.live ? '● LIVE' : `${fmt(shown)} / ${fmt(duration)}`;
+  showTime($('#time'), current?.live ? null : shown, duration);
   updateCaps();
 }
 function savePos(force) {
@@ -429,24 +421,30 @@ addEventListener('beforeunload', () => savePos(true));
 
 /* ================= controls ================= */
 const toggle = () => { if (!current) return; v.paused ? v.play().catch(() => {}) : v.pause(); };
-$('#pp').onclick = toggle; $('#miniPP').onclick = toggle; $('#bigplay').onclick = toggle;
-v.addEventListener('click', () => { if (!pop.hidden) closePop(); else toggle(); });
-v.addEventListener('dblclick', () => { if (curRoute() === 'watch') $('#fs').click(); });
-$('#back').onclick = () => seekTo(pos() - 10);
-$('#fwd').onclick = () => seekTo(pos() + 10);
-$('#nextBtn').onclick = next; $('#prevBtn').onclick = prev;
+const ui = playerChrome(stage, v, {
+  toggle,
+  skip: d => {
+    if (!current) return false;
+    if (current.live || !duration) { toast('This can\'t be seeked'); return false; }
+    seekTo(pos() + d); return true;
+  },
+});
+$('#pp').onclick = $('#midPP').onclick = ui.toggle; $('#miniPP').onclick = toggle;
+$('#nextBtn').onclick = $('#midNext').onclick = next; $('#prevBtn').onclick = $('#midPrev').onclick = prev;
 $('#retry').onclick = () => current && startItem(current, pos() || null);
 $('#errNext').onclick = next;
 $('#miniExpand').onclick = () => current && nav(watchPath(current.id));
 $('#miniClose').onclick = stopPlayback;
-$('#fs').onclick = () => (document.fullscreenElement ? document.exitFullscreen() : stage.requestFullscreen());
+$('#fs').onclick = () => toggleFullscreen(stage, v);
 $('#thBtn').onclick = () => setOv('view', eff('view') === 'theater' ? 'normal' : 'theater');
 document.addEventListener('fullscreenchange', () => {
   closePop();
   const fsOn = !!document.fullscreenElement;
-  $('#fs').firstChild.firstChild.setAttribute('href', fsOn ? '#i-fullexit' : '#i-full');
+  for (const b of $$fs()) setIcon(b, fsOn ? 'fullexit' : 'full');
   $('#thBtn').hidden = fsOn;
+  wake();
 });
+const $$fs = () => document.querySelectorAll('[data-c="fs"]');
 
 seek.addEventListener('input', () => { dragging = true; render(); });
 seek.addEventListener('change', () => { dragging = false; seekTo(Number(seek.value)); });
@@ -467,6 +465,73 @@ setVolume(store.get('vol', 1), false);
 v.playbackRate = rate;
 function setRate(r) { rate = r; v.playbackRate = r; v.defaultPlaybackRate = r; store.set('rate', r); refreshPop(); }
 
+/* ----- what the two web players (YouTube here, files under Network) share: the design is the one the apps use too ----- */
+const touchUI = matchMedia('(pointer: coarse), (max-width: 600px)');
+function setIcon(button, name) { button.querySelector('use').setAttribute('href', '#i-' + name); }
+function showTime(node, at, length) { // at = null: a live stream
+  node.classList.toggle('live', at === null);
+  node.textContent = at === null ? 'LIVE' : `${fmt(at)} / ${fmt(length)}`;
+}
+function toggleFullscreen(root, vid) {
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  else if (root.requestFullscreen) root.requestFullscreen().catch(() => {});
+  else vid.webkitEnterFullscreen?.(); // iPhone: only the video itself can go full screen
+}
+// on a touch screen captions and settings sit at the top right, as in the YouTube app
+function layoutChrome(root) {
+  const right = root.querySelector('.cright');
+  if (touchUI.matches) root.querySelector('[data-c="topend"]').append(right);
+  else root.querySelector('[data-c="list"]').before(right);
+}
+touchUI.addEventListener?.('change', () => document.querySelectorAll('.stage').forEach(layoutChrome));
+layoutChrome(stage);
+
+// Controls that hide by themselves, tap / double-tap gestures, the play/pause flash and the "10 seconds" ripple.
+// `skip(seconds)` seeks and returns whether it could; `busy()` = a menu is open, so the controls must stay.
+function playerChrome(root, vid, { toggle, skip, busy = () => !pop.hidden }) {
+  const flash = el('div', 'bezel'), ripple = el('div', 'skipfx');
+  root.append(flash, ripple);
+  let hideT = 0, tapT = 0, tapSide = 0, single = 0, total = 0, rippleT = 0;
+  const playing = () => root.dataset.state === 'playing';
+  const hide = () => { if (playing() && !busy()) root.classList.add('ui-hidden'); };
+  const wake = () => {
+    root.classList.remove('ui-hidden'); clearTimeout(hideT);
+    if (playing()) hideT = setTimeout(hide, 2800);
+  };
+  const flashToggle = () => {
+    if (!vid.getAttribute('src')) return toggle();
+    flash.replaceChildren(icon(vid.paused ? 'play' : 'pause'));
+    toggle();
+    flash.classList.remove('go'); void flash.offsetWidth; flash.classList.add('go');
+  };
+  const seekBy = d => {
+    if (!skip(d)) return;
+    total = ripple.classList.contains('on') && Math.sign(total) === Math.sign(d) ? total + d : d;
+    ripple.className = 'skipfx on ' + (d < 0 ? 'left' : 'right');
+    ripple.replaceChildren(el('b', '', d < 0 ? '‹‹‹' : '›››'), el('span', '', `${Math.abs(total)} seconds`));
+    clearTimeout(rippleT); rippleT = setTimeout(() => ripple.classList.remove('on'), 700);
+  };
+  root.addEventListener('pointermove', e => { if (e.pointerType === 'mouse') wake(); });
+  root.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse') hide(); });
+  root.addEventListener('pointerup', e => { if (e.target.closest('.chrome')) wake(); });
+  root.addEventListener('click', e => {
+    if (e.target.closest('button, input, .errorbox, .minibar, .lpanel, .pop')) return;
+    if (!pop.hidden) return closePop();
+    if (!touchUI.matches) return flashToggle();
+    // touch: a tap shows or hides the controls; two quick taps on a side skip 10 seconds, and each further tap 10 more
+    const r = root.getBoundingClientRect(), x = (e.clientX - r.left) / r.width, side = x < .35 ? -1 : x > .65 ? 1 : 0, now = performance.now();
+    const again = side && side === tapSide && now - tapT < 350;
+    tapT = now; tapSide = side; clearTimeout(single);
+    if (again) return seekBy(side * 10);
+    single = setTimeout(() => (root.classList.contains('ui-hidden') || !playing() ? wake() : hide()), side ? 260 : 0);
+  });
+  root.addEventListener('dblclick', e => {
+    if (touchUI.matches || e.target.closest('button, input, .lpanel') || (root === stage && curRoute() !== 'watch')) return;
+    toggleFullscreen(root, vid);
+  });
+  return { wake, seekBy, toggle: flashToggle, stop: () => { clearTimeout(hideT); clearTimeout(single); clearTimeout(rippleT); } };
+}
+
 function setSession() {
   if (!('mediaSession' in navigator) || !current) return;
   navigator.mediaSession.metadata = new MediaMetadata({ title: current.title || '', artist: current.channel || '', artwork: [{ src: thumbOf(current.id), sizes: '320x180' }] });
@@ -480,13 +545,13 @@ document.addEventListener('keydown', e => {
   const typing = e.target.matches('input[type=text], input[type=search]');
   if (e.key === '/' && !typing) { e.preventDefault(); $('#q').focus(); return; }
   if (e.key === 'Escape' && typing) { e.target.blur(); return; }
-  if (typing || e.ctrlKey || e.metaKey || e.altKey || !current) return;
+  if (typing || e.ctrlKey || e.metaKey || e.altKey || !current || lplayer) return;
   const k = e.key.toLowerCase();
-  if (k === ' ' || k === 'k') { if (e.target.matches('button, input, a')) return; e.preventDefault(); toggle(); }
-  else if (k === 'j') seekTo(pos() - 10);
-  else if (k === 'l') seekTo(pos() + 10);
-  else if (e.key === 'ArrowLeft') seekTo(pos() - 5);
-  else if (e.key === 'ArrowRight') seekTo(pos() + 5);
+  if (k === ' ' || k === 'k') { if (e.target.matches('button, input, a')) return; e.preventDefault(); ui.toggle(); wake(); }
+  else if (k === 'j') ui.seekBy(-10);
+  else if (k === 'l') ui.seekBy(10);
+  else if (e.key === 'ArrowLeft') ui.seekBy(-5);
+  else if (e.key === 'ArrowRight') ui.seekBy(5);
   else if (e.key === 'ArrowUp') { e.preventDefault(); setVolume(Math.min(1, v.volume + .05)); }
   else if (e.key === 'ArrowDown') { e.preventDefault(); setVolume(Math.max(0, v.volume - .05)); }
   else if (k === 'm') $('#mute').click();
@@ -545,13 +610,8 @@ function chooseTrack(t) {
   setOv('subs', true);
   if (cc.lang !== t.lang || cc.auto !== t.auto) loadTrack(t);
 }
-$('#ccBtn').onclick = e => {
-  const items = [{ head: 'Subtitles' }, { label: 'Off', check: !eff('subs'), fn: () => setOv('subs', false) }];
-  for (const t of cc.tracks) {
-    items.push({ label: t.name + (t.auto ? ' (auto-generated)' : ''), check: eff('subs') && cc.lang === t.lang && cc.auto === t.auto, fn: () => chooseTrack(t) });
-  }
-  menu(e.currentTarget, items);
-};
+// the button switches captions on and off; the language is picked under Settings > Captions
+$('#ccBtn').onclick = () => setOv('subs', !eff('subs'));
 
 /* ================= popovers, menus, dialogs ================= */
 const pop = $('#pop');
@@ -560,11 +620,14 @@ function openPop(anchor, build) {
   const node = typeof build === 'function' ? build() : build;
   popState = { anchor, build: typeof build === 'function' ? build : null };
   (document.fullscreenElement || document.body).append(pop); // must live inside the fullscreen element to be visible there
+  const dark = node.classList.contains('ytm'); // the player's own menu
+  pop.classList.toggle('yt', dark);
   pop.textContent = ''; pop.append(node); pop.hidden = false;
   const a = anchor.getBoundingClientRect(), pw = pop.offsetWidth, ph = pop.offsetHeight, pad = 8;
   const left = Math.min(Math.max(pad, a.right - pw), innerWidth - pw - pad);
   let top = a.bottom + 4;
-  if (top + ph > innerHeight - pad) top = Math.max(pad, a.top - ph - 4);
+  if (dark && a.top - ph - 8 >= pad) top = a.top - ph - 8; // above the control bar when there is room
+  else if (top + ph > innerHeight - pad) top = Math.max(pad, a.top - ph - 4);
   pop.style.left = left + 'px'; pop.style.top = top + 'px';
 }
 function closePop() { pop.hidden = true; popState = null; }
@@ -608,39 +671,51 @@ function sw(on, pick, label) {
   return b;
 }
 
-// player-level overrides
-function playbackPanel() {
-  const w = el('div', 'pb');
-  const head = el('div', 'pbhead');
-  head.append(el('strong', '', 'Playback options'));
-  const reset = button('btn text sm', 'Reset', null, resetOv); reset.disabled = !Object.keys(ov).length;
-  head.append(reset); w.append(head);
-
-  const row = (title, key, ctl, inline) => {
-    const r = el('div', 'setrow' + (inline ? ' inline' : ''));
-    const l = el('div'); l.append(el('div', 'lbl', title));
-    if (key) {
-      const c = el('div', 'cap' + (key in ov ? ' ov' : ''));
-      c.textContent = key in ov ? `Overridden here · default is ${LABEL[key](settings[key])}` : 'Using your default';
-      l.append(c);
+// The player's settings menu, YouTube style: a list of settings, each opening its choices. rows() returns
+// { id, icon, label, value, options: [{ label, on, fn }], extra: () => node } or { icon, label, toggle, fn } or { node }.
+function ytMenu(anchor, rows) {
+  let page = null;
+  openPop(anchor, () => {
+    const w = el('div', 'ytm'); w.setAttribute('role', 'menu');
+    const list = rows(), sub = list.find(r => r.id && r.id === page && r.options);
+    const line = (cls, fn, ...kids) => { const b = el('button', 'ytrow' + cls); b.type = 'button'; b.setAttribute('role', 'menuitem'); b.append(...kids); b.onclick = fn; return b; };
+    if (sub) {
+      w.append(line(' ythead', () => { page = null; refreshPop(); }, icon('back'), el('span', 'ytl', sub.label)));
+      for (const o of sub.options) w.append(line(' opt' + (o.on ? ' on' : ''), () => { page = null; o.fn(); refreshPop(); }, icon('check'), el('span', 'ytl', o.label)));
+      if (sub.extra) w.append(sub.extra());
+    } else for (const r of list) {
+      if (r.node) { w.append(r.node); continue; }
+      const kids = [icon(r.icon), el('span', 'ytl', r.label)];
+      if (r.toggle !== undefined) kids.push(el('span', 'yttoggle' + (r.toggle ? ' on' : '')));
+      else if (r.value) kids.push(el('span', 'ytv', r.value));
+      if (r.options) kids.push(icon('chev'));
+      const b = line('', () => { if (r.options) page = r.id; else r.fn(); refreshPop(); }, ...kids);
+      if (r.toggle !== undefined) { b.setAttribute('role', 'menuitemcheckbox'); b.setAttribute('aria-checked', r.toggle); }
+      b.disabled = !r.options && !r.fn;
+      w.append(b);
     }
-    r.append(l, ctl); return r;
-  };
-  const fsOn = !!document.fullscreenElement;
-  w.append(row('Stream', 'stream', seg([{ v: 'video', label: 'Video' }, { v: 'audio', label: 'Audio' }], eff('stream'), x => setOv('stream', x))));
-  w.append(row('Quality', 'quality', seg(HEIGHTS.map(h => ({ v: h, label: qLabel(h) })), eff('quality'), x => setOv('quality', x), eff('stream') === 'audio')));
-  w.append(row('View', 'view', seg([{ v: 'normal', label: 'Normal' }, { v: 'theater', label: 'Theater' }, { v: 'full', label: 'Full' }], fsOn ? 'full' : eff('view'),
-    x => { if (x === 'full') { closePop(); stage.requestFullscreen(); } else { if (fsOn) document.exitFullscreen(); setOv('view', x); } })));
-  const sp = el('div', 'setrow'); sp.append(el('div', 'lbl', 'Speed'), seg(RATES.map(r => ({ v: r, label: r + '×' })), rate, setRate)); w.append(sp);
-  w.append(row('Subtitles', 'subs', sw(eff('subs'), x => setOv('subs', x), 'Subtitles'), true));
-  w.append(row('Autoplay next', 'autoplay', sw(eff('autoplay'), x => setOv('autoplay', x), 'Autoplay next'), true));
-  const foot = el('div'); foot.style.cssText = 'display:flex;justify-content:flex-end';
-  foot.append(button('btn text sm', 'Default settings…', null, () => { closePop(); if (document.fullscreenElement) document.exitFullscreen(); openSettings(); }));
-  w.append(foot);
-  return w;
+    return w;
+  });
 }
-$('#gear').onclick = e => (popState?.anchor === e.currentTarget && !pop.hidden ? closePop() : openPop(e.currentTarget, playbackPanel));
-$('#modeChip').onclick = e => openPop(e.currentTarget, playbackPanel);
+const speedRow = (now, set) => ({ id: 'speed', icon: 'speed', label: 'Playback speed', value: speedLabel(now), options: RATES.map(r => ({ label: speedLabel(r), on: r === now, fn: () => set(r) })) });
+// the same rows, in the same order, as the apps' settings
+function playerSettings() {
+  const audio = eff('stream') === 'audio', on = eff('subs') && cc.lang;
+  const trackName = t => t.name + (t.auto ? ' (auto-generated)' : '');
+  const sel = on && cc.tracks.find(t => t.lang === cc.lang && t.auto === cc.auto);
+  const rows = [];
+  if (!audio) rows.push({ id: 'quality', icon: 'hd', label: 'Quality', value: qLabel(eff('quality')), options: HEIGHTS.map(h => ({ label: qLabel(h), on: eff('quality') === h, fn: () => setOv('quality', h) })) });
+  rows.push(speedRow(rate, setRate));
+  rows.push({ id: 'captions', icon: 'cc', label: 'Captions', value: !cc.tracks.length ? 'Unavailable' : sel ? trackName(sel) : 'Off',
+    options: cc.tracks.length ? [{ label: 'Off', on: !eff('subs'), fn: () => setOv('subs', false) }, ...cc.tracks.map(t => ({ label: trackName(t), on: sel === t, fn: () => chooseTrack(t) }))] : null });
+  rows.push({ icon: 'audio', label: 'Audio only', toggle: audio, fn: () => setOv('stream', audio ? 'video' : 'audio') });
+  rows.push({ icon: 'autoplay', label: 'Autoplay next', toggle: eff('autoplay'), fn: () => setOv('autoplay', !eff('autoplay')) });
+  if (Object.keys(ov).length) rows.push({ icon: 'retry', label: 'Reset to my defaults', fn: resetOv });
+  return rows;
+}
+const menuIsOpen = anchor => popState?.anchor === anchor && !pop.hidden;
+$('#gear').onclick = e => (menuIsOpen(e.currentTarget) ? closePop() : ytMenu(e.currentTarget, playerSettings));
+$('#modeChip').onclick = e => ytMenu(e.currentTarget, playerSettings);
 
 function applyUI() {
   const m = mode() === 'audio', theater = eff('view') === 'theater';
@@ -653,7 +728,6 @@ function applyUI() {
   $('#modeChip').querySelector('use').setAttribute('href', m ? '#i-audio' : '#i-video');
   const anyOv = Object.keys(ov).length > 0;
   $('#modeChip').classList.toggle('on', anyOv);
-  $('#gear').classList.toggle('on', anyOv);
   syncCaptions();
 }
 
@@ -688,7 +762,7 @@ function viewSettings() {
           title: 'Reset recommendations?', text: 'Home will build its suggestions again from what you watch from now on. Your watch history is kept.', confirm: 'Reset',
           fn: () => { recsSince = Date.now(); store.set('recsSince', recsSince); feed.items = []; feed.key = ''; feed.at = 0; loadFeed(true); toast('Recommendations reset'); },
         })), true),
-        el('p', 'note', 'These are your defaults for everything. The tune button on the player overrides stream, quality, view, subtitles, speed and autoplay just for what you are watching now, without changing these.'),
+        el('p', 'note', 'These are your defaults for everything. The settings button on the player overrides stream, quality, view, subtitles, speed and autoplay just for what you are watching now, without changing these.'),
       );
       root.append(box);
     };
@@ -1328,16 +1402,25 @@ function closeLocalPlayer() {
   const { vid, root } = lplayer;
   vid.pause(); vid.removeAttribute('src'); vid.load();
   lplayer.urls.forEach(u => URL.revokeObjectURL(u));
-  removeEventListener('keydown', lplayer.key); clearTimeout(lplayer.idleT);
+  removeEventListener('keydown', lplayer.key); lplayer.ui?.stop();
+  closePop(); document.body.append(pop); // the menu may be inside the player that is going away
   if (document.fullscreenElement === root) document.exitFullscreen().catch(() => {});
   root.remove(); lplayer = null;
 }
 function openLocalPlayer(list, start) {
   closeLocalPlayer();
   if (current && !v.paused) v.pause();
-  const root = el('div', 'lplayer'), vid = el('video'), bar = el('div', 'lbar'), title = el('div', 'ltitle'), msg = el('div', 'lmsg'), hudEl = el('div', 'lhud'), menu = el('div', 'lmenu'), panel = el('div', 'lpanel'), styleEl = el('style');
-  vid.controls = true; vid.playsInline = true; menu.hidden = panel.hidden = true;
-  const st = lplayer = { root, vid, urls: [], i: start, key: null, idleT: 0, save: () => {}, subs: [], subSel: null, delay: 0, size: 100, fill: false };
+  const root = el('div', 'lplayer stage'), vid = el('video'), msg = el('div', 'lmsg'), hudEl = el('div', 'lhud'), panel = el('div', 'lpanel'), styleEl = el('style');
+  vid.playsInline = true; panel.hidden = true; root.dataset.state = 'loading';
+  // the same controls as the main player, copied from it
+  const chrome = $('#chrome').cloneNode(true);
+  for (const n of [chrome, ...chrome.querySelectorAll('[id]')]) n.removeAttribute('id');
+  const c = name => chrome.querySelector(`[data-c="${name}"]`);
+  c('close').hidden = c('list').hidden = false; c('theater').hidden = true;
+  c('cc').disabled = c('seek').disabled = false; c('cc').setAttribute('aria-pressed', 'false');
+  setIcon(c('fs'), 'full');
+  const spin = el('div', 'center'); spin.append(el('span', 'spinner'));
+  const st = lplayer = { root, vid, urls: [], i: start, key: null, ui: null, save: () => {}, subs: [], subSel: null, delay: 0, size: 100, fill: false };
   const pick = el('input'); pick.type = 'file'; pick.accept = '.srt,.vtt,.ass,.ssa'; pick.hidden = true;
   let hudT = 0;
   const hud = text => { hudEl.textContent = text; hudEl.classList.add('on'); clearTimeout(hudT); hudT = setTimeout(() => hudEl.classList.remove('on'), 1000); };
@@ -1371,7 +1454,7 @@ function openLocalPlayer(list, start) {
   const setSub = async id => { // id: null = off, 'sN' / 'uN' = a file, 'eN' = a track inside the video
     for (const t of vid.textTracks) t.mode = 'disabled';
     st.subSel = id;
-    if (id == null) { hud('Subtitles off'); return renderMenu(); }
+    if (id == null) { hud('Captions off'); return renderMenu(); }
     let label = '';
     if (id[0] === 'e') { const t = vid.textTracks[+id.slice(1)]; if (t) { t.mode = 'showing'; label = t.label || t.language || 'Embedded'; } }
     else {
@@ -1389,41 +1472,40 @@ function openLocalPlayer(list, start) {
     const s = st.subs.find(x => x.id === st.subSel); if (s?.cues) { for (const t of vid.textTracks) t.mode = 'disabled'; showCues(s); }
     hud(`Subtitle delay ${st.delay > 0 ? '+' : ''}${st.delay.toFixed(1)} s`); renderMenu();
   };
-  const cycleSub = () => {
-    const ids = [null, ...st.subs.map(x => x.id), ...embedded().map(x => 'e' + x.n)], at = ids.indexOf(st.subSel);
-    setSub(ids[(at + 1) % ids.length]);
-  };
   pick.addEventListener('change', () => {
     const f = pick.files[0]; pick.value = ''; if (!f) return;
     const id = 'u' + st.subs.length; st.subs.push({ id, label: f.name, src: { name: f.name, handle: { getFile: async () => f } }, cues: null, track: null });
     setSub(id);
   });
 
-  // ---- the settings menu ----
-  const setRate = r => { vid.playbackRate = r; hud(`Speed ${r}×`); renderMenu(); };
-  const RATES = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
-  function renderMenu() {
-    menu.textContent = '';
-    const sec = (t, ...kids) => { const d = el('div', 'lrow'); d.append(el('div', 'lrt', t), ...kids); menu.append(d); };
-    const chips = el('div', 'lchips'), subOpts = [{ v: '', label: 'Off' }, ...st.subs.map(x => ({ v: x.id, label: x.label })), ...embedded().map(x => ({ v: 'e' + x.n, label: x.t.label || x.t.language || `Track ${x.n + 1}` }))];
-    for (const o of subOpts) chips.append(button('chipb' + ((st.subSel ?? '') === o.v ? ' on' : ''), o.label, null, () => setSub(o.v || null)));
-    chips.append(button('chipb', 'Add file…', null, () => pick.click()));
-    const stepper = (text, onMinus, onPlus) => { const d = el('div', 'lstep'); d.append(button('chipb', '−', null, onMinus), el('span', '', text), button('chipb', '+', null, onPlus)); return d; };
-    sec('Subtitles', chips);
-    if (st.subSel) { sec('Subtitle delay', stepper(`${st.delay > 0 ? '+' : ''}${st.delay.toFixed(1)} s`, () => setDelay(st.delay - 0.1), () => setDelay(st.delay + 0.1))); }
-    sec('Subtitle size', stepper(`${st.size}%`, () => { st.size = Math.max(50, st.size - 10); applySize(); renderMenu(); }, () => { st.size = Math.min(300, st.size + 10); applySize(); renderMenu(); }));
-    const at = vid.audioTracks ? [...vid.audioTracks] : null, aud = el('div', 'lchips');
-    if (at && at.length > 1) at.forEach((t, n) => aud.append(button('chipb' + (t.enabled ? ' on' : ''), t.label || (t.language ? langOf(t.language) : `Track ${n + 1}`), null, () => { at.forEach((x, k) => { x.enabled = k === n; }); hud('Audio: ' + (t.label || t.language || `track ${n + 1}`)); renderMenu(); })));
-    else aud.append(el('div', 'lnote', at ? 'This file has a single audio track.' : 'This browser can’t switch audio tracks. In Chrome, turn on chrome://flags → “Experimental Web Platform features”; Safari supports it already.'));
-    sec('Audio track', aud);
-    sec('Speed', ...[(() => { const g = el('div', 'lchips'); for (const r of RATES) g.append(button('chipb' + (vid.playbackRate === r ? ' on' : ''), r + '×', null, () => setRate(r))); return g; })()]);
-    const opt = el('div', 'lopts');
-    const o1 = el('label', 'lopt'); o1.append(sw(vid.loop, x => { vid.loop = x; hud(x ? 'Repeat this file' : 'Repeat off'); renderMenu(); }, 'Repeat this file'), document.createTextNode('Repeat this file'));
-    const o2 = el('label', 'lopt'); o2.append(sw(st.fill, x => { st.fill = x; vid.style.objectFit = x ? 'cover' : 'contain'; renderMenu(); }, 'Fill the screen'), document.createTextNode('Fill the screen (crop edges)'));
-    opt.append(o1, o2); sec('Picture', opt);
-    menu.append(el('div', 'lkeys', 'Space play · ← → 5 s · J L 10 s · ↑ ↓ volume · M mute · F full screen · C subtitles · Z X delay · [ ] speed · N P next/previous · Esc close'));
+  // ---- the settings menu: the same one as the main player's ----
+  const setRate = r => { vid.playbackRate = r; hud(`Speed ${speedLabel(r)}`); renderMenu(); };
+  const subChoices = () => [...st.subs.map(x => ({ id: x.id, label: x.label })), ...embedded().map(x => ({ id: 'e' + x.n, label: x.t.label || x.t.language || `Track ${x.n + 1}` }))];
+  function renderMenu() { // after any change: the caption button, and the menu if it is open
+    c('cc').setAttribute('aria-pressed', st.subSel != null);
+    refreshPop();
   }
-  const langOf = c => { try { return new Intl.DisplayNames(['en'], { type: 'language' }).of(c) || c; } catch { return c; } };
+  const settingsRows = () => {
+    const choices = subChoices(), at = vid.audioTracks ? [...vid.audioTracks] : [], trackName = (t, n) => t.label || (t.language ? langOf(t.language) : `Track ${n + 1}`);
+    const stepper = (name, text, onMinus, onPlus) => { const d = el('div', 'lstep'); d.append(el('span', 'ytl', name), button('chipb', '−', null, onMinus), el('span', 'lval', text), button('chipb', '+', null, onPlus)); return d; };
+    const captionExtra = () => {
+      const d = el('div', 'ytextra');
+      if (st.subSel) d.append(stepper('Delay', `${st.delay > 0 ? '+' : ''}${st.delay.toFixed(1)} s`, () => setDelay(st.delay - 0.1), () => setDelay(st.delay + 0.1)));
+      d.append(stepper('Size', `${st.size}%`, () => { st.size = Math.max(50, st.size - 10); applySize(); renderMenu(); }, () => { st.size = Math.min(300, st.size + 10); applySize(); renderMenu(); }));
+      return d;
+    };
+    return [
+      speedRow(vid.playbackRate, setRate),
+      { id: 'captions', icon: 'cc', label: 'Captions', value: choices.find(x => x.id === st.subSel)?.label || 'Off', extra: captionExtra,
+        options: [{ label: 'Off', on: st.subSel == null, fn: () => setSub(null) }, ...choices.map(x => ({ label: x.label, on: st.subSel === x.id, fn: () => setSub(x.id) })), { label: 'Add a subtitle file…', fn: () => pick.click() }] },
+      { id: 'track', icon: 'audio', label: 'Audio track', value: at.length > 1 ? trackName(at.find(t => t.enabled) || at[0], Math.max(0, at.findIndex(t => t.enabled))) : vid.audioTracks ? 'Only one' : 'Not supported by this browser',
+        options: at.length > 1 ? at.map((t, n) => ({ label: trackName(t, n), on: t.enabled, fn: () => { at.forEach((x, k) => { x.enabled = k === n; }); hud('Audio: ' + trackName(t, n)); } })) : null },
+      { icon: 'retry', label: 'Repeat this file', toggle: vid.loop, fn: () => { vid.loop = !vid.loop; } },
+      { icon: 'full', label: 'Fill the screen (crop edges)', toggle: st.fill, fn: () => { st.fill = !st.fill; vid.style.objectFit = st.fill ? 'cover' : 'contain'; } },
+      { node: el('div', 'lkeys', 'Space play · ← → 5 s · J L 10 s · ↑ ↓ volume · M mute · F full screen · C captions · Z X delay · [ ] speed · N P next/previous · Esc close') },
+    ];
+  };
+  const langOf = code => { try { return new Intl.DisplayNames(['en'], { type: 'language' }).of(code) || code; } catch { return code; } };
 
   // ---- the playlist panel ----
   function renderPanel() {
@@ -1438,7 +1520,11 @@ function openLocalPlayer(list, start) {
     st.i = Math.max(0, Math.min(list.length - 1, k)); msg.textContent = '';
     vid.querySelectorAll('track').forEach(t => t.remove()); st.subs = []; st.subSel = null; st.delay = 0;
     const item = list[st.i];
-    title.textContent = item.name + (list.length > 1 ? `  ·  ${st.i + 1} / ${list.length}` : '');
+    c('title').textContent = item.name;
+    c('sub').textContent = list.length > 1 ? `${st.i + 1} / ${list.length}` : '';
+    c('prev').disabled = c('midprev').disabled = st.i === 0;
+    c('next').disabled = c('midnext').disabled = st.i === list.length - 1;
+    setState('loading');
     try {
       let size = item.size || 0;
       const oldUrl = st.urls.pop();
@@ -1448,45 +1534,85 @@ function openLocalPlayer(list, start) {
       keyNow = item.name + '|' + size;
       st.subs = (item.subs || []).map((x, n) => ({ id: 's' + n, label: subLabel(item.name, x.name), src: x, cues: null, track: null }));
       vid.play().catch(() => {});
-    } catch (e) { msg.textContent = 'Couldn’t open this file: ' + e.message; }
+    } catch (e) { msg.textContent = 'Couldn’t open this file: ' + e.message; setState('paused'); }
     renderMenu(); renderPanel();
   };
   vid.addEventListener('ended', () => { delete posMap[keyNow]; store.set('netpos', posMap); keyNow = ''; if (st.i + 1 < list.length) load(st.i + 1); });
-  vid.addEventListener('error', () => { msg.textContent = 'Your browser can’t play this file format (MP4, WebM, MP3, M4A, FLAC, WAV and OGG usually work; some MKV and HEVC files do not).'; });
-  vid.addEventListener('ratechange', () => { if (!menu.hidden) renderMenu(); });
-  vid.textTracks.addEventListener('addtrack', () => { if (!menu.hidden) renderMenu(); });
+  vid.addEventListener('error', () => { setState('paused'); msg.textContent = 'Your browser can’t play this file format (MP4, WebM, MP3, M4A, FLAC, WAV and OGG usually work; some MKV and HEVC files do not).'; });
+  vid.addEventListener('ratechange', renderMenu);
+  vid.textTracks.addEventListener('addtrack', renderMenu);
 
-  // ---- the bar, menus, keyboard ----
-  const closeMenus = () => { menu.hidden = panel.hidden = true; };
-  const toggle = (box, other) => { other.hidden = true; box.hidden = !box.hidden; if (!box.hidden) { renderMenu(); renderPanel(); } };
-  const fs = () => (document.fullscreenElement ? document.exitFullscreen() : root.requestFullscreen()).catch(() => {});
-  bar.append(iconBtn('back', 'Close', () => closeLocalPlayer(), 'ib sclose'), title,
-    iconBtn('cc', 'Subtitles (C)', cycleSub, 'ib sclose'), iconBtn('list', 'Files in this folder', () => toggle(panel, menu), 'ib sclose'), iconBtn('settings', 'Subtitles, audio, speed…', () => toggle(menu, panel), 'ib sclose'),
-    iconBtn('back', 'Previous (P)', () => load(st.i - 1), 'ib sclose lprev'), iconBtn('back', 'Next (N)', () => load(st.i + 1), 'ib sclose lnext'));
-  vid.addEventListener('click', closeMenus);
-  vid.addEventListener('dblclick', fs);
-  const wake = () => { root.classList.remove('idle'); clearTimeout(st.idleT); st.idleT = setTimeout(() => { if (!vid.paused && menu.hidden && panel.hidden) root.classList.add('idle'); }, 3000); };
-  root.addEventListener('pointermove', wake); wake();
+  // ---- the controls and the keyboard ----
+  function setState(s) {
+    root.dataset.state = s;
+    for (const n of ['pp', 'midpp']) setIcon(c(n), s === 'playing' ? 'pause' : 'play');
+    st.ui?.wake();
+  }
+  vid.addEventListener('playing', () => setState('playing'));
+  vid.addEventListener('waiting', () => setState('loading'));
+  vid.addEventListener('pause', () => { if (!vid.ended) setState('paused'); });
+  vid.addEventListener('canplay', () => { if (vid.paused) setState('paused'); });
+
+  let dragging = false;
+  const bar = c('seek');
+  const render = () => {
+    const length = isFinite(vid.duration) ? vid.duration : 0, at = dragging ? Number(bar.value) : vid.currentTime;
+    bar.max = length; if (!dragging) bar.value = at;
+    let loaded = 0;
+    for (let i = 0; i < vid.buffered.length; i++) if (vid.buffered.start(i) <= vid.currentTime + .5) loaded = Math.max(loaded, vid.buffered.end(i));
+    const pct = x => (length ? Math.min(100, x / length * 100) : 0) + '%';
+    c('seekwrap').style.setProperty('--p', pct(at)); c('seekwrap').style.setProperty('--b', pct(loaded));
+    showTime(c('time'), at, length);
+  };
+  for (const ev of ['timeupdate', 'progress', 'durationchange', 'emptied']) vid.addEventListener(ev, render);
+  bar.addEventListener('input', () => { dragging = true; render(); });
+  bar.addEventListener('change', () => { dragging = false; vid.currentTime = Number(bar.value); render(); });
+  c('seekwrap').addEventListener('pointermove', e => {
+    const r = c('seekwrap').getBoundingClientRect(), f = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)), tip = c('tip');
+    tip.textContent = fmt(f * (vid.duration || 0)); tip.style.left = Math.min(r.width - 24, Math.max(24, f * r.width)) + 'px';
+  });
+
+  const toggle = () => (vid.paused ? vid.play().catch(() => {}) : vid.pause());
+  const jump = d => { if (!isFinite(vid.duration)) return false; vid.currentTime = Math.max(0, Math.min(vid.duration, vid.currentTime + d)); return true; };
+  const fs = () => toggleFullscreen(root, vid);
+  const cycle = () => { if (st.subSel != null) setSub(null); else if (subChoices().length) setSub(subChoices()[0].id); else pick.click(); };
+  const volume = x => {
+    vid.volume = x; vid.muted = x === 0; c('vol').value = x; setIcon(c('mute'), x === 0 ? 'mute' : 'vol'); store.set('vol', x);
+  };
+  volume(store.get('vol', 1));
+  let beforeMute = 1;
+  c('mute').onclick = () => { if (vid.volume > 0) { beforeMute = vid.volume; volume(0); } else volume(beforeMute || 1); };
+  c('vol').oninput = e => volume(Number(e.target.value));
+  c('close').onclick = closeLocalPlayer;
+  c('prev').onclick = c('midprev').onclick = () => load(st.i - 1);
+  c('next').onclick = c('midnext').onclick = () => load(st.i + 1);
+  c('cc').onclick = cycle;
+  c('gear').onclick = () => { panel.hidden = true; menuIsOpen(c('gear')) ? closePop() : ytMenu(c('gear'), settingsRows); };
+  c('list').onclick = () => { closePop(); panel.hidden = !panel.hidden; if (!panel.hidden) renderPanel(); st.ui.wake(); };
+  c('fs').onclick = fs;
+  root.addEventListener('click', e => { if (!e.target.closest('button, .lpanel')) panel.hidden = true; });
+
   st.key = e => {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
-    const k = e.key, jump = d => { vid.currentTime = Math.max(0, Math.min(vid.duration || 1e9, vid.currentTime + d)); hud(`${d > 0 ? '+' : '−'}${Math.abs(d)} s`); };
-    if (k === 'Escape') { if (!menu.hidden || !panel.hidden) closeMenus(); else if (!document.fullscreenElement) closeLocalPlayer(); return; }
-    else if (k === ' ' || k === 'k') { e.preventDefault(); vid.paused ? vid.play().catch(() => {}) : vid.pause(); }
-    else if (k === 'ArrowRight') { e.preventDefault(); jump(5); } else if (k === 'ArrowLeft') { e.preventDefault(); jump(-5); }
-    else if (k === 'l') jump(10); else if (k === 'j') jump(-10);
-    else if (k === 'ArrowUp') { e.preventDefault(); vid.volume = Math.min(1, vid.volume + 0.05); hud(`Volume ${Math.round(vid.volume * 100)}%`); }
-    else if (k === 'ArrowDown') { e.preventDefault(); vid.volume = Math.max(0, vid.volume - 0.05); hud(`Volume ${Math.round(vid.volume * 100)}%`); }
-    else if (k === 'm') { vid.muted = !vid.muted; hud(vid.muted ? 'Muted' : 'Sound on'); }
+    const k = e.key;
+    if (k === 'Escape') { if (!panel.hidden) panel.hidden = true; else if (!document.fullscreenElement) closeLocalPlayer(); return; }
+    else if (k === ' ' || k === 'k') { if (e.target.matches('button, input')) return; e.preventDefault(); st.ui.toggle(); }
+    else if (k === 'ArrowRight') { e.preventDefault(); st.ui.seekBy(5); } else if (k === 'ArrowLeft') { e.preventDefault(); st.ui.seekBy(-5); }
+    else if (k === 'l') st.ui.seekBy(10); else if (k === 'j') st.ui.seekBy(-10);
+    else if (k === 'ArrowUp') { e.preventDefault(); volume(Math.min(1, vid.volume + 0.05)); hud(`Volume ${Math.round(vid.volume * 100)}%`); }
+    else if (k === 'ArrowDown') { e.preventDefault(); volume(Math.max(0, vid.volume - 0.05)); hud(`Volume ${Math.round(vid.volume * 100)}%`); }
+    else if (k === 'm') c('mute').click();
     else if (k === 'f') fs();
-    else if (k === 'c') cycleSub();
+    else if (k === 'c') cycle();
     else if (k === 'z') setDelay(st.delay - 0.1); else if (k === 'x') setDelay(st.delay + 0.1);
     else if (k === '[' || k === ']') { const at = RATES.indexOf(vid.playbackRate); const n = RATES[Math.max(0, Math.min(RATES.length - 1, (at < 0 ? RATES.indexOf(1) : at) + (k === ']' ? 1 : -1)))]; setRate(n); }
     else if (k === 'n') load(st.i + 1); else if (k === 'p') load(st.i - 1);
     else return;
-    wake();
+    st.ui.wake();
   };
   addEventListener('keydown', st.key);
-  root.append(vid, bar, menu, panel, hudEl, msg, pick, styleEl); document.body.append(root); applySize();
+  root.append(vid, spin, hudEl, msg, chrome, panel, pick, styleEl); document.body.append(root); applySize(); layoutChrome(root);
+  st.ui = playerChrome(root, vid, { toggle, skip: jump, busy: () => !pop.hidden || !panel.hidden });
   load(start);
 }
 
@@ -1692,7 +1818,7 @@ function viewNetwork() {
         const code = el('code', 'ncode', cmd); box.append(code);
         const row = el('div', 'nrow2'); row.append(button('btn tonal sm has-icon', 'Check again', 'retry', async () => { await probeHelper(); draw(); }), button('btn text sm', 'Copy command', null, () => { navigator.clipboard?.writeText(cmd).then(() => toast('Command copied')); }));
         box.append(row); g2.append(box);
-      } else g2.append(ghostCard('network', 'Find devices', 'Search this network for shared computers and NAS boxes', findDevices));
+      } else g2.append(ghostCard('network', 'Find network', 'Search this network for shared computers and NAS boxes', findDevices));
       root.append(g2);
     }
 

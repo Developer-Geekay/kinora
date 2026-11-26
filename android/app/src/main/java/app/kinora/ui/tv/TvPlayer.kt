@@ -29,26 +29,17 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Forward10
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlaylistAdd
-import androidx.compose.material.icons.filled.Replay10
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
-import androidx.compose.material.icons.filled.Audiotrack
-import androidx.compose.material.icons.filled.Subtitles
-import androidx.compose.material.icons.filled.SubtitlesOff
-import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
@@ -56,9 +47,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -84,6 +73,8 @@ import androidx.compose.ui.input.key.nativeKeyCode
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.style.TextAlign
@@ -100,12 +91,24 @@ import app.kinora.data.formatTime
 import app.kinora.data.qualityLabel
 import app.kinora.tubeApp
 import app.kinora.ui.LocalPlayback
+import app.kinora.ui.FlashState
+import app.kinora.ui.PlayerFlash
+import app.kinora.ui.PlayerPanel
+import app.kinora.ui.PlayerRed
+import app.kinora.ui.PlayerSettingsList
+import app.kinora.ui.SeekTrack
+import app.kinora.ui.SkipFeedback
+import app.kinora.ui.playerSettings
+import app.kinora.ui.rememberSkipState
+import androidx.compose.material.icons.filled.ClosedCaption
+import androidx.compose.material.icons.filled.Settings
 import coil.compose.AsyncImage
 import kotlinx.coroutines.delay
 
 /*
  * The TV player. Everything works from the remote:
  *   Left / Right        seek 10 s (hold to go faster); works while the controls are hidden, and on the seek bar
+ *                       (the look, the seek feedback and the settings menu are shared with the phone: see PlayerKit.kt)
  *   OK                  play / pause (when the controls are hidden or the seek bar is focused)
  *   Up / Down           show the controls; Down from the seek bar reaches the buttons
  *   Play/Pause, FF, RW  the remote's media keys; Next / Previous too
@@ -114,7 +117,6 @@ import kotlinx.coroutines.delay
  */
 
 private const val STEP_MS = 10_000L
-private val OPTION_SPEEDS = listOf(0.75f, 1f, 1.25f, 1.5f, 2f)
 
 @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
 @Composable
@@ -131,7 +133,6 @@ fun TvPlayerScreen(onClose: () -> Unit, onSave: (Video) -> Unit) {
     var keyTick by remember { mutableIntStateOf(0) }       // bumped on every key: restarts the auto-hide timer
     var scrub by remember { mutableStateOf<Long?>(null) }   // where the user is scrubbing to, until it is applied
     var seekFocused by remember { mutableStateOf(false) }
-    var hint by remember { mutableStateOf<String?>(null) } // name of the focused control, shown above the buttons
     var related by remember { mutableStateOf(false) }
     var details by remember { mutableStateOf(false) }
     var buttonsFocused by remember { mutableStateOf(false) }
@@ -145,7 +146,11 @@ fun TvPlayerScreen(onClose: () -> Unit, onSave: (Video) -> Unit) {
     val rootFocus = remember { FocusRequester() }
     val seekFocus = remember { FocusRequester() }
     val relatedBtn = remember { FocusRequester() }
-    var returnToRelated by remember { mutableStateOf(false) }
+    val settingsBtn = remember { FocusRequester() }
+    val playBtn = remember { FocusRequester() }
+    var returnTo by remember { mutableStateOf<FocusRequester?>(null) } // the button that opened the panel now closing
+    val skip = rememberSkipState()
+    val flash = rememberFlash()
     val errorFocus = remember { FocusRequester() }
 
     // the TV must not go to sleep while a video plays
@@ -158,13 +163,13 @@ fun TvPlayerScreen(onClose: () -> Unit, onSave: (Video) -> Unit) {
     // keep the focus somewhere that makes sense, so the remote always does something
     LaunchedEffect(visible, options, related, pb.error) {
         when {
-            options -> Unit
-            related -> returnToRelated = true
+            options -> returnTo = settingsBtn
+            related -> returnTo = relatedBtn
             pb.error != null -> runCatching { errorFocus.requestFocus() }
             visible -> {
-                val target = if (returnToRelated) relatedBtn else seekFocus
-                if (returnToRelated) delay(150) // the strip that just closed is still on screen for a moment and would hold the focus
-                returnToRelated = false
+                val target = returnTo ?: seekFocus
+                if (returnTo != null) delay(150) // what just closed is still on screen for a moment and would hold the focus
+                returnTo = null
                 runCatching { target.requestFocus() }.onFailure { runCatching { seekFocus.requestFocus() } }
             }
             else -> runCatching { rootFocus.requestFocus() }
@@ -180,8 +185,16 @@ fun TvPlayerScreen(onClose: () -> Unit, onSave: (Video) -> Unit) {
     }
 
     fun scrubBy(delta: Long) {
+        controls = true
+        if (pb.live || pb.durationMs <= 0) return // nothing to seek in (yet)
         val max = (pb.durationMs - 1000).coerceAtLeast(0)
         scrub = ((scrub ?: pb.positionMs) + delta).coerceIn(0L, max)
+        skip.add((delta / 1000).toInt())
+    }
+
+    fun toggle() {
+        flash.show(if (pb.playing) Icons.Filled.Pause else Icons.Filled.PlayArrow)
+        pb.toggle()
         controls = true
     }
 
@@ -209,7 +222,9 @@ fun TvPlayerScreen(onClose: () -> Unit, onSave: (Video) -> Unit) {
                     else -> STEP_MS
                 }
                 when (e.key) {
-                    Key.MediaPlayPause, Key.MediaPlay, Key.MediaPause -> { pb.toggle(); controls = true; true }
+                    Key.MediaPlayPause -> { toggle(); true }
+                    Key.MediaPlay -> { if (!pb.playing) toggle(); true }
+                    Key.MediaPause -> { if (pb.playing) toggle(); true }
                     Key.MediaFastForward, Key.MediaStepForward -> { scrubBy(3 * STEP_MS); true }
                     Key.MediaRewind, Key.MediaStepBackward -> { scrubBy(-3 * STEP_MS); true }
                     Key.MediaNext -> { pb.next(); true }
@@ -217,7 +232,7 @@ fun TvPlayerScreen(onClose: () -> Unit, onSave: (Video) -> Unit) {
                     Key.DirectionLeft -> if (!visible || seekFocused) { scrubBy(-step); true } else false
                     Key.DirectionRight -> if (!visible || seekFocused) { scrubBy(step); true } else false
                     Key.DirectionCenter, Key.Enter, Key.NumPadEnter ->
-                        if (!visible || seekFocused) { pb.toggle(); controls = true; true } else false
+                        if (!visible || seekFocused) { toggle(); true } else false
                     Key.DirectionDown -> when {
                         !visible -> { controls = true; true }
                         !seekFocused && relatedList.isNotEmpty() -> { related = true; true } // Down from a button (not the seek bar) opens the related strip
@@ -250,8 +265,10 @@ fun TvPlayerScreen(onClose: () -> Unit, onSave: (Video) -> Unit) {
         }
 
         if ((pb.starting || pb.buffering) && pb.error == null) {
-            CircularProgressIndicator(Modifier.align(Alignment.Center).size(64.dp), color = MaterialTheme.colorScheme.primary, strokeWidth = 5.dp)
+            CircularProgressIndicator(Modifier.align(Alignment.Center).size(64.dp), color = Color.White, strokeWidth = 5.dp)
         }
+        SkipFeedback(skip, textSize = 22.sp)
+        PlayerFlash(flash, size = 112.dp)
 
         // ----- controls (YouTube style: title at the top, a thin red bar, plain white icons) -----
         AnimatedVisibility(visible, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.fillMaxSize()) {
@@ -265,39 +282,29 @@ fun TvPlayerScreen(onClose: () -> Unit, onSave: (Video) -> Unit) {
                     Text(sub, color = Color(0xCCFFFFFF), fontSize = 16.sp, modifier = Modifier.padding(top = 2.dp))
                 }
 
-                Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(horizontal = 56.dp).padding(bottom = 28.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(horizontal = 56.dp).padding(bottom = 44.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     val shown = scrub ?: pb.positionMs
-                    Text(hint.orEmpty(), color = Color(0xE6FFFFFF), fontSize = 15.sp, modifier = Modifier.height(20.dp))
                     TvSeekBar(if (pb.live) 1L else shown, if (pb.live) 1L else pb.bufferedMs, if (pb.live) 1L else pb.durationMs, scrubbing = scrub != null,
-                        modifier = Modifier.focusRequester(seekFocus), onFocus = { seekFocused = it })
-                    Row(Modifier.fillMaxWidth().padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-                        if (pb.live) Text("LIVE", color = Color.White, fontSize = 14.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
-                            modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(Color(0xFFFF0000)).padding(horizontal = 8.dp, vertical = 1.dp))
-                        else Text(formatTime(shown / 1000) + "  /  " + formatTime(pb.durationMs / 1000), color = Color.White, fontSize = 16.sp)
+                        modifier = Modifier.focusRequester(seekFocus).focusProperties { down = playBtn }, onFocus = { seekFocused = it }) // Down from the bar = Play
+                    if (pb.live) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Box(Modifier.size(10.dp).clip(CircleShape).background(PlayerRed))
+                        Text("LIVE", color = Color.White, fontSize = 16.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+                    } else Text(formatTime(shown / 1000) + " / " + formatTime(pb.durationMs / 1000), color = Color.White, fontSize = 16.sp)
+                    Row(Modifier.fillMaxWidth().padding(top = 4.dp).onFocusChanged { buttonsFocused = it.hasFocus }, verticalAlignment = Alignment.CenterVertically) {
+                        TvControl(Icons.Filled.SkipPrevious, "Previous") { pb.previous() }
+                        TvControl(if (pb.playing) Icons.Filled.Pause else Icons.Filled.PlayArrow, if (pb.playing) "Pause" else "Play", size = 56.dp, modifier = Modifier.focusRequester(playBtn)) { toggle() }
+                        TvControl(Icons.Filled.SkipNext, if (pb.index < pb.queue.size - 1) "Next" else "No next video", enabled = pb.index < pb.queue.size - 1) { pb.next() }
                         Box(Modifier.weight(1f))
-                        if (pb.durationMs > 0 && !pb.live) {
-                            val leftMs = ((pb.durationMs - shown) / pb.speed.coerceAtLeast(0.25f)).toLong().coerceAtLeast(0)
-                            val endsAt = java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(java.util.Date(System.currentTimeMillis() + leftMs))
-                            Text("ends $endsAt" + if (pb.speed != 1f) "  ·  ${pb.speed}×" else "", color = Color(0xB3FFFFFF), fontSize = 14.sp)
-                        }
-                    }
-                    Row(Modifier.fillMaxWidth().onFocusChanged { buttonsFocused = it.hasFocus }, verticalAlignment = Alignment.CenterVertically) {
-                        TvControl(if (pb.playing) Icons.Filled.Pause else Icons.Filled.PlayArrow, if (pb.playing) "Pause" else "Play", size = 56.dp, onFocus = { hint = it }) { pb.toggle() }
-                        TvControl(Icons.Filled.SkipPrevious, "Previous", onFocus = { hint = it }) { pb.previous() }
-                        TvControl(Icons.Filled.SkipNext, "Next video", enabled = pb.index < pb.queue.size - 1, onFocus = { hint = it }) { pb.next() }
-                        TvControl(Icons.Filled.Replay10, "Back 10 seconds", onFocus = { hint = it }) { scrubBy(-STEP_MS) }
-                        TvControl(Icons.Filled.Forward10, "Forward 10 seconds", onFocus = { hint = it }) { scrubBy(STEP_MS) }
-                        Box(Modifier.weight(1f))
-                        if (pb.textTracks.isNotEmpty()) TvControl(
-                            if (pb.subtitlesOn) Icons.Filled.Subtitles else Icons.Filled.SubtitlesOff,
-                            if (pb.subtitlesOn) "Subtitles on (press to turn off)" else "Subtitles off (press to turn on)",
-                            lit = pb.subtitlesOn, onFocus = { hint = it },
+                        TvControl(
+                            Icons.Filled.ClosedCaption,
+                            when { pb.textTracks.isEmpty() -> "No captions"; pb.subtitlesOn -> "Captions on"; else -> "Captions off" },
+                            enabled = pb.textTracks.isNotEmpty(), lit = pb.subtitlesOn,
                         ) { if (pb.subtitlesOn) pb.selectSubtitles(null) else pb.selectSubtitles(pb.textTracks.firstOrNull { it.supported }) }
-                        if (pb.audioTracks.size > 1) TvControl(Icons.Filled.Audiotrack, "Audio track", onFocus = { hint = it }) { options = true }
-                        if (info != null) TvControl(Icons.Filled.Info, "About this video: channel and description", onFocus = { hint = it }) { details = true }
-                        if (relatedList.isNotEmpty()) TvControl(Icons.Filled.VideoLibrary, "Related videos (or press Down)", modifier = Modifier.focusRequester(relatedBtn), onFocus = { hint = it }) { related = true }
-                        TvControl(Icons.Filled.PlaylistAdd, "Save to playlist", onFocus = { hint = it }) { video?.let(onSave) }
-                        TvControl(Icons.Filled.Tune, "Settings: quality, speed, subtitles", onFocus = { hint = it }) { options = true }
+                        TvControl(Icons.Filled.Settings, "Settings", modifier = Modifier.focusRequester(settingsBtn)) { options = true }
+                        // always there (greyed out until the details arrive), so a focused button never disappears under the remote
+                        TvControl(Icons.Filled.Info, "About", enabled = info != null) { details = true }
+                        TvControl(Icons.Filled.VideoLibrary, "Related videos", enabled = relatedList.isNotEmpty(), modifier = Modifier.focusRequester(relatedBtn)) { related = true }
+                        TvControl(Icons.Filled.PlaylistAdd, "Save to playlist") { video?.let(onSave) }
                     }
                 }
             }
@@ -317,7 +324,7 @@ fun TvPlayerScreen(onClose: () -> Unit, onSave: (Video) -> Unit) {
             }
         }
 
-        if (options) TvOptionsPanel(onDismiss = { options = false })
+        if (options) TvSettingsPanel(onDismiss = { options = false })
         if (details) info?.let { TvDetailsPanel(it, video?.channel.orEmpty(), onDismiss = { details = false }) }
         if (related) TvRelatedStrip(relatedList, onPick = { i -> related = false; play(relatedList, i) }, onDismiss = { related = false })
     }
@@ -325,22 +332,38 @@ fun TvPlayerScreen(onClose: () -> Unit, onSave: (Video) -> Unit) {
 
 // ---------------------------------------------------------------------------------------------------------------------
 
-/** A plain white icon; the focused one gets a white disc with a dark icon, like YouTube on a TV. */
+/**
+ * A plain white icon; the focused one gets a white disc with a dark icon and its name underneath, like YouTube on a TV.
+ * A greyed-out control still takes focus (only OK does nothing): if it didn't, the focus would vanish the moment the
+ * button under it became unavailable, such as Next on reaching the last video.
+ */
 @Composable
-private fun TvControl(icon: ImageVector, label: String, size: Dp = 48.dp, filled: Boolean = false, enabled: Boolean = true, lit: Boolean = false, modifier: Modifier = Modifier, onFocus: (String?) -> Unit = {}, onClick: () -> Unit) {
+private fun TvControl(icon: ImageVector, label: String, size: Dp = 48.dp, enabled: Boolean = true, lit: Boolean = false, modifier: Modifier = Modifier, onClick: () -> Unit) {
     var focused by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(if (focused) 1.1f else 1f, label = "ctl")
-    Box(
-        modifier.size(size)
-            .graphicsLayer { scaleX = scale; scaleY = scale; alpha = if (enabled) 1f else 0.35f }
-            .onFocusChanged { focused = it.hasFocus; onFocus(if (it.hasFocus) label else null) }
-            .clip(CircleShape)
-            .background(if (focused) Color.White else Color.Transparent)
-            .clickable(enabled = enabled, onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(icon, label, tint = if (focused) Color(0xFF0F0F0F) else Color.White, modifier = Modifier.size(size * 0.58f))
-        if (lit) Box(Modifier.align(Alignment.BottomCenter).padding(bottom = 3.dp).size(width = 14.dp, height = 3.dp).clip(CircleShape).background(Color(0xFFFF0000)))
+    Box(Modifier.size(size)) {
+        Box(
+            modifier.fillMaxSize()
+                .graphicsLayer { scaleX = scale; scaleY = scale; alpha = if (enabled) 1f else 0.4f }
+                .onFocusChanged { focused = it.hasFocus }
+                .clip(CircleShape)
+                .background(if (focused) Color.White else Color.Transparent)
+                .clickable { if (enabled) onClick() },
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(icon, label, tint = if (focused) Color(0xFF0F0F0F) else Color.White, modifier = Modifier.size(size * 0.58f))
+            if (lit) Box(Modifier.align(Alignment.BottomCenter).padding(bottom = 3.dp).size(width = 20.dp, height = 3.dp).clip(CircleShape).background(PlayerRed))
+        }
+        // takes no room in the row: measured freely and centred on the button
+        if (focused) Text(
+            label, color = Color.White, fontSize = 13.sp, maxLines = 1, softWrap = false,
+            modifier = Modifier.align(Alignment.BottomCenter)
+                .layout { measurable, _ ->
+                    val text = measurable.measure(Constraints())
+                    layout(0, 0) { text.place(-text.width / 2, 8.dp.roundToPx()) }
+                }
+                .background(Color(0xE60F0F0F), RoundedCornerShape(6.dp)).padding(horizontal = 8.dp, vertical = 3.dp),
+        )
     }
 }
 
@@ -348,26 +371,14 @@ private fun TvControl(icon: ImageVector, label: String, size: Dp = 48.dp, filled
 @Composable
 private fun TvSeekBar(positionMs: Long, bufferedMs: Long, durationMs: Long, scrubbing: Boolean, modifier: Modifier = Modifier, onFocus: (Boolean) -> Unit) {
     var focused by remember { mutableStateOf(false) }
-    val total = durationMs.coerceAtLeast(1).toFloat()
-    val pos = (positionMs / total).coerceIn(0f, 1f)
-    val buf = (bufferedMs / total).coerceIn(0f, 1f)
-    val thick by animateFloatAsState(if (focused || scrubbing) 8f else 4f, label = "seek")
+    val active = focused || scrubbing
+    val thick by animateFloatAsState(if (active) 8f else 4f, label = "seek")
     Box(
         modifier.fillMaxWidth().height(28.dp)
             .onFocusChanged { focused = it.isFocused; onFocus(it.isFocused) }
             .focusable(),
         contentAlignment = Alignment.CenterStart,
-    ) {
-        Box(Modifier.fillMaxWidth().height(thick.dp).clip(RoundedCornerShape(50)).background(Color(0x4DFFFFFF))) {
-            Box(Modifier.fillMaxWidth(buf).fillMaxHeight().background(Color(0x80FFFFFF)))
-            Box(Modifier.fillMaxWidth(pos).fillMaxHeight().background(Color(0xFFFF0000)))
-        }
-        if (focused || scrubbing) {
-            Box(Modifier.fillMaxWidth(pos), contentAlignment = Alignment.CenterEnd) {
-                Box(Modifier.offset(x = 9.dp).size(18.dp).clip(CircleShape).background(Color(0xFFFF0000)))
-            }
-        }
-    }
+    ) { SeekTrack(positionMs, bufferedMs, durationMs, thickness = thick.dp, knob = if (active) 20.dp else 0.dp) }
 }
 
 /** Channel, numbers and the description, as a panel on the right. Each paragraph can take focus, so Up/Down scroll through it. */
@@ -433,68 +444,17 @@ private fun TvRelatedStrip(videos: List<Video>, onPick: (Int) -> Unit, onDismiss
     }
 }
 
-/** Stream, quality, speed and autoplay for what is playing now, as a panel on the right. */
+/** The settings menu (the same list as on the phone and the web), as a panel on the right. */
 @Composable
 @UnstableApi
-private fun TvOptionsPanel(onDismiss: () -> Unit) {
-    val app = LocalContext.current.tubeApp
-    val pb = LocalPlayback.current
-    val first = remember { FocusRequester() }
-    LaunchedEffect(Unit) { runCatching { first.requestFocus() } }
-
-    Box(Modifier.fillMaxSize().background(Color(0x99000000)).clickable(onClick = onDismiss)) {
+private fun TvSettingsPanel(onDismiss: () -> Unit) {
+    Box(Modifier.fillMaxSize().clickable(onClick = onDismiss)) {
         Surface(
-            Modifier.align(Alignment.CenterEnd).fillMaxHeight().width(620.dp).clickable(enabled = false) {},
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            shape = RoundedCornerShape(topStart = 28.dp, bottomStart = 28.dp),
-        ) {
-            Column(Modifier.verticalScroll(rememberScrollState()).padding(36.dp), verticalArrangement = Arrangement.spacedBy(22.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Playback options", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.weight(1f))
-                    TextButton({ app.resetOverrides(); pb.reload(true) }, enabled = app.hasOverrides) { Text("Reset") }
-                }
-                if (pb.textTracks.isNotEmpty()) OptionGroup("Subtitles") {
-                    OptionChip("Off", !pb.subtitlesOn, Modifier.focusRequester(first)) { pb.selectSubtitles(null) }
-                    pb.textTracks.forEach { t -> OptionChip(t.label + if (t.supported) "" else " · not supported", t.selected, enabled = t.supported) { pb.selectSubtitles(t) } }
-                }
-                if (pb.audioTracks.size > 1) OptionGroup("Audio") {
-                    pb.audioTracks.forEach { t -> OptionChip(t.label + if (t.supported) "" else " · not supported", t.selected, enabled = t.supported) { pb.selectAudio(t) } }
-                }
-                OptionGroup("Stream") {
-                    OptionChip("Video", app.stream == "video", if (pb.textTracks.isEmpty()) Modifier.focusRequester(first) else Modifier) { app.ovStream = if ("video" == app.store.stream) null else "video"; pb.reload(true) }
-                    OptionChip("Audio only", app.stream == "audio") { app.ovStream = if ("audio" == app.store.stream) null else "audio"; pb.reload(true) }
-                }
-                OptionGroup("Quality") {
-                    listOf(360, 480, 720, 1080).forEach { q ->
-                        OptionChip(qualityLabel(q), app.quality == q, enabled = app.stream == "video") { app.ovQuality = if (q == app.store.quality) null else q; pb.reload(true) }
-                    }
-                }
-                OptionGroup("Speed") {
-                    OPTION_SPEEDS.forEach { s -> OptionChip("${s}×", pb.speed == s) { pb.changeSpeed(s) } }
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Autoplay next", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                    Switch(app.autoplay, { app.ovAutoplay = if (it == app.store.autoplay) null else it; pb.reload(false) })
-                }
-                Text("Back closes this panel.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        }
+            Modifier.align(Alignment.BottomEnd).padding(end = 48.dp, bottom = 40.dp, top = 40.dp).width(460.dp).clickable(enabled = false) {},
+            color = PlayerPanel, shape = RoundedCornerShape(18.dp),
+        ) { PlayerSettingsList(playerSettings(), textSize = 18.sp) }
     }
 }
 
 @Composable
-private fun OptionGroup(title: String, content: @Composable () -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text(title, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
-        @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
-        androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) { content() }
-    }
-}
-
-@Composable
-private fun OptionChip(text: String, selected: Boolean, modifier: Modifier = Modifier, enabled: Boolean = true, onClick: () -> Unit) {
-    app.kinora.ui.FocusChip(
-        selected = selected, onClick = onClick, enabled = enabled, modifier = modifier,
-        label = { Text(text, fontSize = 18.sp, modifier = Modifier.padding(horizontal = 6.dp, vertical = 8.dp)) },
-    )
-}
+private fun rememberFlash() = remember { FlashState() }

@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -91,7 +92,7 @@ fun SetupScreen(onDone: () -> Unit) {
             keyboardActions = KeyboardActions(onDone = { if (server.isNotBlank() && pin.isNotBlank() && !busy) connect() }), modifier = Modifier.fillMaxWidth())
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         Button(onClick = ::connect, enabled = server.isNotBlank() && pin.isNotBlank() && !busy, modifier = Modifier.fillMaxWidth()) {
-            if (busy) CircularProgressIndicator(Modifier.width(18.dp), strokeWidth = 2.dp) else Text("Connect")
+            if (busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp) else Text("Connect")
         }
         TextButton(onClick = { app.store.source = "device"; app.store.saveConnection(); onDone() }, modifier = Modifier.fillMaxWidth()) {
             Text("Use this phone instead")

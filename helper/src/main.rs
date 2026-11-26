@@ -126,7 +126,7 @@ async fn main() {
     };
     println!("Kinora helper {VERSION} is running on http://{addr}");
     println!("Pairing code: {token}");
-    println!("In the Kinora web page: Network > Find on the network, then type that code once.");
+    println!("In the Kinora web page: Network > Find network, then type that code once.");
     println!("Allowed portals: {}", origins.join(", "));
     if let Some(d) = &app.demo { println!("DEMO MODE: serving {} as the pretend host \"demo\"", d.display()); }
     axum::serve(listener, router).await.unwrap();

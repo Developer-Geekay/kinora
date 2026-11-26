@@ -40,7 +40,7 @@ The phone and PC must be on the same Wi-Fi. `npm start` (no `lan`) keeps the ser
 
 - Home (continue watching, playlists, recent), Search (or paste a link), Library (playlists and history), Settings.
 - Player: video or audio-only, seek bar, previous/next, queue (reorder, remove, save as playlist), full screen in landscape.
-- Defaults in Settings (stream type, quality up to 4K, autoplay, theme). The tune button in the player overrides stream,
+- Defaults in Settings (stream type, quality up to 4K, autoplay, theme). The gear in the player overrides stream,
   quality, speed and autoplay for what is playing now, without changing your defaults.
 - Resume where you stopped, watch history, playlists. All stored on the phone.
 - Keeps playing with the screen off. Notification and headset buttons control it.

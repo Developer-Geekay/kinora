@@ -6,6 +6,18 @@ import android.app.Activity
 import android.content.pm.ActivityInfo
 import android.content.res.Configuration
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.layout.height
+import androidx.compose.material.icons.filled.ClosedCaption
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.unit.Dp
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -47,28 +59,23 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PlaylistAdd
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
-import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -108,8 +115,6 @@ import coil.compose.AsyncImage
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-private val SPEEDS = listOf(0.75f, 1f, 1.25f, 1.5f, 2f)
-
 /** Compact "now playing" bar shown above the bottom navigation while something is loaded. */
 @Composable
 @UnstableApi
@@ -139,7 +144,7 @@ fun MiniPlayer(onOpen: () -> Unit) {
             }
             LinearProgressIndicator(
                 progress = { if (pb.durationMs > 0) (pb.positionMs.toFloat() / pb.durationMs).coerceIn(0f, 1f) else 0f },
-                modifier = Modifier.fillMaxWidth(), trackColor = Color.Transparent,
+                modifier = Modifier.fillMaxWidth(), color = PlayerRed, trackColor = Color.Transparent,
             )
         }
     }
@@ -183,8 +188,9 @@ fun PlayerScreen(onClose: () -> Unit, onSave: (Video) -> Unit) {
     }
     DisposableEffect(Unit) { onDispose { activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED } }
 
-    // controls fade away while playing
-    LaunchedEffect(controls, pb.playing) { if (controls && pb.playing) { delay(3500); controls = false } }
+    // controls fade away while playing (but not while a finger is on the seek bar)
+    var scrub by remember { mutableStateOf<Long?>(null) }
+    LaunchedEffect(controls, pb.playing, scrub != null) { if (controls && pb.playing && scrub == null) { delay(3500); controls = false } }
 
     val openRelated = LocalPlay.current
     val v = pb.current
@@ -215,13 +221,13 @@ fun PlayerScreen(onClose: () -> Unit, onSave: (Video) -> Unit) {
 
     Surface(Modifier.fillMaxSize().then(remote), color = MaterialTheme.colorScheme.surface) {
         if (isFull) {
-            VideoArea(audio, controls, { controls = !controls }, onClose, { options = true }, landscape = true, onToggleOrientation = {
+            VideoArea(audio, controls, { controls = !controls }, onClose, { options = true }, scrub, { scrub = it }, landscape = true, onToggleOrientation = {
                 fullscreen = false
                 if (landscape) activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
             }, modifier = Modifier.fillMaxSize().background(Color.Black))
         } else {
             Column(Modifier.fillMaxSize().statusBarsPadding()) {
-                VideoArea(audio, controls, { controls = !controls }, onClose, { options = true }, landscape = false, onToggleOrientation = {
+                VideoArea(audio, controls, { controls = !controls }, onClose, { options = true }, scrub, { scrub = it }, landscape = false, onToggleOrientation = {
                     if (pb.videoPortrait) fullscreen = true else activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
                 }, modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f).background(Color.Black))
 
@@ -268,7 +274,7 @@ fun PlayerScreen(onClose: () -> Unit, onSave: (Video) -> Unit) {
         }
     }
 
-    if (options) OptionsSheet(onDismiss = { options = false })
+    if (options) SettingsSheet(onDismiss = { options = false })
 }
 
 @Composable
@@ -279,6 +285,8 @@ private fun VideoArea(
     toggleControls: () -> Unit,
     onClose: () -> Unit,
     openOptions: () -> Unit,
+    scrub: Long?,
+    onScrub: (Long?) -> Unit,
     landscape: Boolean,
     onToggleOrientation: () -> Unit,
     modifier: Modifier,
@@ -288,10 +296,11 @@ private fun VideoArea(
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     var fast by remember { mutableStateOf(false) } // holding a finger on the picture = 2x speed, like YouTube
     // Touch gestures on the picture: tap = show/hide the controls; double-tap the left third = back 10 s, the right third =
-    // forward 10 s (tap again to keep going: +20, +30 ...), the middle = play/pause.
-    var hint by remember { mutableStateOf<Pair<Int, Int>?>(null) } // (side: -1 back, 0 pause, 1 forward, seconds so far)
+    // forward 10 s (double-tap again to keep going: 20, 30 ...), the middle = play/pause.
+    val skip = rememberSkipState()
+    val flash = remember { FlashState() }
     var areaWidth by remember { mutableStateOf(1) }
-    LaunchedEffect(hint) { if (hint != null) { delay(700); hint = null } }
+    fun toggle() { flash.show(if (pb.playing) Icons.Filled.Pause else Icons.Filled.PlayArrow); pb.toggle() }
     Box(
         modifier
             .onSizeChanged { areaWidth = it.width.coerceAtLeast(1) }
@@ -322,13 +331,10 @@ private fun VideoArea(
                     onTap = { toggleControls() },
                     onDoubleTap = { p ->
                         val side = when { p.x < areaWidth / 3f -> -1; p.x > areaWidth * 2f / 3f -> 1; else -> 0 }
-                        if (side == 0) { pb.toggle(); hint = 0 to 0 }
-                        else {
-                            val same = hint?.first == side
-                            val total = if (same) hint!!.second + 10 else 10
-                            val max = (pb.durationMs - 1000).coerceAtLeast(0)
-                            pb.seek((pb.positionMs + side * 10_000L).coerceIn(0L, max))
-                            hint = side to total
+                        if (side == 0) toggle()
+                        else if (!pb.live && pb.durationMs > 0) {
+                            pb.seek((pb.positionMs + side * 10_000L).coerceIn(0L, (pb.durationMs - 1000).coerceAtLeast(0)))
+                            skip.add(side * 10)
                         }
                     },
                 )
@@ -354,132 +360,123 @@ private fun VideoArea(
             )
         }
 
-        hint?.let { (side, secs) ->
-            val label = when (side) { -1 -> "− $secs s"; 1 -> "+ $secs s"; else -> if (pb.playing) "Playing" else "Paused" }
-            val at = when (side) { -1 -> Alignment.CenterStart; 1 -> Alignment.CenterEnd; else -> Alignment.Center }
-            Text(label, color = Color.White, fontWeight = FontWeight.Bold,
-                modifier = Modifier.align(at).padding(horizontal = 36.dp).clip(RoundedCornerShape(24.dp)).background(Color(0x99000000)).padding(horizontal = 18.dp, vertical = 10.dp))
-        }
+        SkipFeedback(skip)
+        PlayerFlash(flash)
         if (fast) Text("2×  ▶▶", color = Color.White, fontWeight = FontWeight.Bold,
             modifier = Modifier.align(Alignment.TopCenter).padding(top = 16.dp).clip(RoundedCornerShape(20.dp)).background(Color(0x99000000)).padding(horizontal = 14.dp, vertical = 6.dp))
-        if (pb.starting || pb.buffering) CircularProgressIndicator(Modifier.align(Alignment.Center).size(48.dp), color = MaterialTheme.colorScheme.primary)
-        pb.error?.let { msg ->
-            Column(Modifier.align(Alignment.Center).background(Color(0xCC000000), RoundedCornerShape(16.dp)).padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(msg, color = Color.White, textAlign = TextAlign.Center)
-                TextButton(pb::retry) { Text("Try again") }
-            }
-        }
+        val loading = (pb.starting || pb.buffering) && pb.error == null
+        if (loading) CircularProgressIndicator(Modifier.align(Alignment.Center).size(48.dp), color = Color.White, strokeWidth = 3.dp)
 
-        AnimatedVisibility(controls, Modifier.fillMaxSize()) {
-            Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0x99000000), Color.Transparent, Color(0xCC000000))))) {
+        val shown = scrub ?: pb.positionMs
+        val length = if (pb.live) 1L else pb.durationMs
+        // controls hidden, upright: only a thin line along the bottom of the picture
+        if (!controls && !landscape && !pb.live) SeekTrack(pb.positionMs, pb.bufferedMs, length, thickness = 2.dp, knob = 0.dp, modifier = Modifier.align(Alignment.BottomCenter))
+
+        AnimatedVisibility(controls, Modifier.fillMaxSize(), enter = fadeIn(), exit = fadeOut()) {
+            Box(Modifier.fillMaxSize().background(Color(0x66000000))) {
                 Row(Modifier.align(Alignment.TopStart).fillMaxWidth().padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClose) { Icon(Icons.Filled.KeyboardArrowDown, "Minimize", tint = Color.White) }
-                    Text(v?.title.orEmpty(), color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-                    IconButton(openOptions) { Icon(Icons.Filled.Tune, "Playback options", tint = Color.White) }
-                }
-                Row(Modifier.align(Alignment.Center), horizontalArrangement = Arrangement.spacedBy(20.dp), verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(pb::previous, colors = IconButtonDefaults.iconButtonColors(contentColor = Color.White)) { Icon(Icons.Filled.SkipPrevious, "Previous", Modifier.size(36.dp)) }
-                    IconButton(pb::toggle, Modifier.size(64.dp).background(Color(0x66000000), CircleShape), colors = IconButtonDefaults.iconButtonColors(contentColor = Color.White)) {
-                        Icon(if (pb.playing) Icons.Filled.Pause else Icons.Filled.PlayArrow, if (pb.playing) "Pause" else "Play", Modifier.size(40.dp))
+                    IconButton(onClose) { Icon(Icons.Filled.KeyboardArrowDown, "Minimize", tint = Color.White, modifier = Modifier.size(30.dp)) }
+                    // upright, the title is under the picture already
+                    Column(Modifier.weight(1f).padding(horizontal = 4.dp)) {
+                        if (landscape) {
+                            Text(v?.title.orEmpty(), color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium)
+                            Text(v?.channel.orEmpty(), color = Color(0xCCFFFFFF), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
+                        }
                     }
-                    IconButton(pb::next, enabled = pb.index < pb.queue.size - 1, colors = IconButtonDefaults.iconButtonColors(contentColor = Color.White, disabledContentColor = Color(0x66FFFFFF))) { Icon(Icons.Filled.SkipNext, "Next", Modifier.size(36.dp)) }
+                    IconButton(
+                        { if (pb.subtitlesOn) pb.selectSubtitles(null) else pb.selectSubtitles(pb.textTracks.firstOrNull { it.supported }) },
+                        enabled = pb.textTracks.isNotEmpty(),
+                    ) {
+                        Box(contentAlignment = Alignment.Center, modifier = Modifier.size(32.dp)) {
+                            Icon(Icons.Filled.ClosedCaption, if (pb.subtitlesOn) "Captions on" else "Captions off", tint = if (pb.textTracks.isEmpty()) Color(0x66FFFFFF) else Color.White)
+                            if (pb.subtitlesOn) Box(Modifier.align(Alignment.BottomCenter).size(width = 18.dp, height = 3.dp).clip(CircleShape).background(PlayerRed))
+                        }
+                    }
+                    IconButton(openOptions) { Icon(Icons.Filled.Settings, "Settings", tint = Color.White) }
                 }
-                Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(horizontal = 12.dp)) {
-                    SeekBar()
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        if (pb.live) Text("LIVE", color = Color.White, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold,
-                            modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(Color(0xFFD32F2F)).padding(horizontal = 6.dp, vertical = 1.dp))
-                        else Text("${formatTime(pb.positionMs / 1000)} / ${formatTime(pb.durationMs / 1000)}", color = Color.White, style = MaterialTheme.typography.labelMedium)
+                if (pb.error == null) Row(Modifier.align(Alignment.Center), horizontalArrangement = Arrangement.spacedBy(36.dp), verticalAlignment = Alignment.CenterVertically) {
+                    CenterButton(Icons.Filled.SkipPrevious, "Previous", 48.dp, onClick = pb::previous)
+                    // the spinner takes the middle button's place while loading
+                    if (loading) Box(Modifier.size(64.dp)) else CenterButton(if (pb.playing) Icons.Filled.Pause else Icons.Filled.PlayArrow, if (pb.playing) "Pause" else "Play", 64.dp, onClick = { toggle() })
+                    CenterButton(Icons.Filled.SkipNext, "Next", 48.dp, enabled = pb.index < pb.queue.size - 1, onClick = pb::next)
+                }
+                Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(horizontal = if (landscape) 24.dp else 0.dp).padding(bottom = if (landscape) 12.dp else 0.dp)) {
+                    Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        if (pb.live) {
+                            Box(Modifier.padding(end = 6.dp).size(8.dp).clip(CircleShape).background(PlayerRed))
+                            Text("LIVE", color = Color.White, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                        } else Text("${formatTime(shown / 1000)} / ${formatTime(pb.durationMs / 1000)}", color = Color.White, style = MaterialTheme.typography.labelMedium)
                         Box(Modifier.weight(1f))
                         IconButton(onToggleOrientation) { Icon(if (landscape) Icons.Filled.FullscreenExit else Icons.Filled.Fullscreen, if (landscape) "Exit full screen" else "Full screen", tint = Color.White) }
                     }
+                    SeekBar(shown, length, scrubbing = scrub != null, onScrub = onScrub)
                 }
+            }
+        }
+
+        pb.error?.let { msg ->
+            Column(
+                Modifier.align(Alignment.Center).padding(16.dp).background(Color(0xE6000000), RoundedCornerShape(16.dp)).padding(20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(msg, color = Color.White, textAlign = TextAlign.Center)
+                Button(pb::retry, colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Black)) { Text("Try again") }
             }
         }
     }
 }
 
+/** The round buttons in the middle of the picture. */
 @Composable
-@UnstableApi
-private fun SeekBar() {
-    val pb = LocalPlayback.current
-    var dragging by remember { mutableStateOf(false) }
-    var drag by remember { mutableFloatStateOf(0f) }
-    val max = pb.durationMs.coerceAtLeast(1).toFloat()
-    Slider(
-        value = if (dragging) drag else pb.positionMs.toFloat().coerceIn(0f, max),
-        onValueChange = { dragging = true; drag = it },
-        onValueChangeFinished = { pb.seek(drag.toLong()); dragging = false },
-        valueRange = 0f..max,
-        modifier = Modifier.fillMaxWidth(),
-    )
+private fun CenterButton(icon: ImageVector, label: String, size: Dp, enabled: Boolean = true, onClick: () -> Unit) {
+    IconButton(onClick, Modifier.size(size).background(Color(0x73000000), CircleShape), enabled = enabled,
+        colors = IconButtonDefaults.iconButtonColors(contentColor = Color.White, disabledContentColor = Color(0x66FFFFFF))) {
+        Icon(icon, label, Modifier.size(size * 0.6f))
+    }
 }
 
-/** Player-level overrides: stream type, quality, speed, autoplay for what's playing now. */
+/** The red progress bar. Tap or drag anywhere on it; the video seeks when the finger lifts. */
+@Composable
+@UnstableApi
+private fun SeekBar(shownMs: Long, lengthMs: Long, scrubbing: Boolean, onScrub: (Long?) -> Unit) {
+    val pb = LocalPlayback.current
+    val report by rememberUpdatedState(onScrub)
+    Box(
+        Modifier.fillMaxWidth().height(28.dp).pointerInput(Unit) {
+            awaitEachGesture {
+                val down = awaitFirstDown()
+                if (pb.live || pb.durationMs <= 0) return@awaitEachGesture
+                fun at(x: Float) = ((x / size.width.coerceAtLeast(1)).coerceIn(0f, 1f) * pb.durationMs).toLong()
+                down.consume()
+                var target = at(down.position.x)
+                report(target)
+                var released = false
+                try {
+                    while (!released) {
+                        val change = awaitPointerEvent().changes.firstOrNull { it.id == down.id } ?: break
+                        target = at(change.position.x)
+                        released = !change.pressed
+                        change.consume()
+                        if (!released) report(target)
+                    }
+                    if (released) pb.seek(target)
+                } finally {
+                    report(null)
+                }
+            }
+        },
+        contentAlignment = Alignment.Center,
+    ) {
+        SeekTrack(if (pb.live) 1L else shownMs, if (pb.live) 1L else pb.bufferedMs, lengthMs, thickness = if (scrubbing) 6.dp else 3.dp, knob = if (pb.live) 0.dp else if (scrubbing) 18.dp else 12.dp)
+    }
+}
+
+/** The settings menu (the same list as on the TV and the web), as a sheet from the bottom. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 @UnstableApi
-private fun OptionsSheet(onDismiss: () -> Unit) {
-    val app = LocalContext.current.tubeApp
-    val pb = LocalPlayback.current
-
-    ModalBottomSheet(onDismissRequest = onDismiss) {
-        Column(Modifier.padding(horizontal = 20.dp).padding(bottom = 28.dp).navigationBarsPadding(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Playback options", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
-                TextButton({ app.resetOverrides(); pb.reload(true) }, enabled = app.hasOverrides) { Text("Reset") }
-            }
-            OptionRow("Stream", note(app.ovStream != null, if (app.store.stream == "audio") "Audio only" else "Video")) {
-                Chips(listOf("video" to "Video", "audio" to "Audio only"), app.stream) {
-                    app.ovStream = if (it == app.store.stream) null else it; pb.reload(true)
-                }
-            }
-            OptionRow("Quality", note(app.ovQuality != null, qualityLabel(app.store.quality))) {
-                Chips(listOf(360, 480, 720, 1080, 1440, 2160).map { it.toString() to qualityLabel(it) }, app.quality.toString(), enabled = app.stream == "video") {
-                    app.ovQuality = if (it.toInt() == app.store.quality) null else it.toInt(); pb.reload(true)
-                }
-            }
-            OptionRow("Speed", null) { Chips(SPEEDS.map { it.toString() to "${it}×" }, pb.speed.toString()) { pb.changeSpeed(it.toFloat()) } }
-            // what is inside the file (files on a network share, and YouTube videos with several languages)
-            if (pb.audioTracks.size > 1) OptionRow("Audio", "${pb.audioTracks.size} tracks") {
-                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    pb.audioTracks.forEach { t -> FilterChip(selected = t.selected, onClick = { pb.selectAudio(t) }, enabled = t.supported, label = { Text(t.label + if (t.supported) "" else " · not supported") }) }
-                }
-            }
-            if (pb.textTracks.isNotEmpty()) OptionRow("Subtitles", "${pb.textTracks.size} found") {
-                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(selected = !pb.subtitlesOn, onClick = { pb.selectSubtitles(null) }, label = { Text("Off") })
-                    pb.textTracks.forEach { t -> FilterChip(selected = t.selected, onClick = { pb.selectSubtitles(t) }, enabled = t.supported, label = { Text(t.label + if (t.supported) "" else " · not supported") }) }
-                }
-            }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text("Autoplay next", style = MaterialTheme.typography.bodyLarge)
-                    val n = note(app.ovAutoplay != null, if (app.store.autoplay) "On" else "Off")
-                    if (n != null) Text(n, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
-                }
-                Switch(app.autoplay, { app.ovAutoplay = if (it == app.store.autoplay) null else it; pb.reload(false) })
-            }
-        }
-    }
-}
-
-private fun note(overridden: Boolean, default: String) = if (overridden) "Overridden here · default is $default" else null
-
-@Composable
-private fun OptionRow(title: String, note: String?, content: @Composable () -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(title, style = MaterialTheme.typography.bodyLarge)
-            if (note != null) Text(note, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
-        }
-        content()
-    }
-}
-
-@Composable
-private fun Chips(options: List<Pair<String, String>>, selected: String, enabled: Boolean = true, onPick: (String) -> Unit) {
-    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        options.forEach { (value, text) -> FilterChip(selected = value == selected, onClick = { onPick(value) }, label = { Text(text) }, enabled = enabled) }
+private fun SettingsSheet(onDismiss: () -> Unit) {
+    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = PlayerPanel, contentColor = Color.White) {
+        PlayerSettingsList(playerSettings(), Modifier.navigationBarsPadding().padding(bottom = 12.dp))
     }
 }

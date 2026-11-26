@@ -143,9 +143,14 @@ class MainActivity : ComponentActivity() {
         return super.dispatchKeyEvent(event)
     }
 
+    override fun onStart() {
+        super.onStart()
+        if (tubeApp.useTv) playback.restore()
+    }
+
     override fun onStop() {
-        // TV: leaving the app (Home, or another app opening) stops playback. Phone: it keeps playing in the background.
-        if (tubeApp.useTv && !isChangingConfigurations) playback.stopForExit()
+        // TV: leaving the app (Home, another app, the screensaver) stops playback but remembers it. Phone: it keeps playing.
+        if (tubeApp.useTv && !isChangingConfigurations) playback.suspendForExit()
         super.onStop()
     }
 
