@@ -48,6 +48,12 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.RadioButton
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -89,11 +95,15 @@ class NetworkState {
     val canGoUp get() = server != null
     var sortKey by mutableStateOf("name")   // name | date | size
     var sortDesc by mutableStateOf(false)
+    var query by mutableStateOf("")         // the top bar's filter, for the folder on screen
+    var type by mutableStateOf("all")       // all | video | audio
+    var options by mutableStateOf(false)    // the filter / sort / view sheet is open
     fun sortBy(key: String) { if (sortKey == key) sortDesc = !sortDesc else { sortKey = key; sortDesc = key != "name" } } // newest / biggest first
     /** Set when the screen's content changes, so the TV remote's focus is put back on the new list (nothing on a touch screen). */
     var restoreFocus by mutableStateOf(false)
-    fun up() { restoreFocus = true; if (path.isEmpty()) server = null else path = path.substringBeforeLast('/', "") }
-    fun open(s: SmbServer) { restoreFocus = true; server = s; path = "" }
+    fun up() { restoreFocus = true; query = ""; if (path.isEmpty()) server = null else path = path.substringBeforeLast('/', "") }
+    fun open(s: SmbServer) { restoreFocus = true; query = ""; server = s; path = "" }
+    fun enter(folder: String) { restoreFocus = true; query = ""; path = folder }
 }
 
 /**
@@ -340,10 +350,17 @@ private fun Browser(state: NetworkState, server: SmbServer, entry: FocusRequeste
     }
 
     val sorted = remember(entries, state.sortKey, state.sortDesc) { sortEntries(entries.orEmpty(), state.sortKey, state.sortDesc) }
-    val files = sorted.filter { !it.isDir && isMediaFile(it.name) }
+    // what the filter leaves: folders stay whatever kind of file is asked for
+    val q = state.query.trim()
+    val shown = sorted.filter { e ->
+        (q.isEmpty() || e.name.contains(q, ignoreCase = true)) && (e.isDir || state.type == "all" || (state.type == "audio") == isAudioFile(e.name))
+    }
+    val files = shown.filter { !it.isDir && isMediaFile(it.name) }
+    val nothing = when { sorted.isNotEmpty() -> "Nothing here matches your filter."; path.isEmpty() -> "This server shares nothing with this login."; else -> "No folders or videos here." }
+    fun videoOf(e: SmbEntry) = Video(smbVideoId(server, e.path), e.name.substringBeforeLast('.', e.name), listOf(sizeText(e.size), dateText(e.modified)).filter { it.isNotBlank() }.joinToString(" · "))
     val crumbs = listOf(server.name) + path.split('/').filter { it.isNotEmpty() }
     fun open(e: SmbEntry) {
-        if (e.isDir) { state.restoreFocus = true; state.path = e.path }
+        if (e.isDir) state.enter(e.path)
         else {
             val videos = files.map { f -> Video(smbVideoId(server, f.path), f.name.substringBeforeLast('.', f.name), server.name) }
             play(videos, files.indexOfFirst { it.path == e.path }.coerceAtLeast(0))
@@ -376,10 +393,10 @@ private fun Browser(state: NetworkState, server: SmbServer, entry: FocusRequeste
                     }
                 }
                 entries == null -> item(span = full) { Box(Modifier.fillMaxWidth().padding(40.dp), Alignment.Center) { CircularProgressIndicator() } }
-                sorted.isEmpty() -> item(span = full) {
-                    Text(if (path.isEmpty()) "This server shares nothing with this login." else "No folders or videos here.", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(24.dp))
+                shown.isEmpty() -> item(span = full) {
+                    Text(nothing, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(24.dp))
                 }
-                else -> itemsIndexed(sorted, key = { _, e -> e.path }) { _, e ->
+                else -> itemsIndexed(shown, key = { _, e -> e.path }) { _, e ->
                     if (e.isDir) TvTile(if (path.isEmpty()) Icons.Filled.Dns else Icons.Filled.Folder, e.name, "") { open(e) }
                     else {
                         val v = Video(smbVideoId(server, e.path), e.name.substringBeforeLast('.', e.name), listOf(sizeText(e.size), dateText(e.modified)).filter { it.isNotBlank() }.joinToString(" · "))
@@ -391,41 +408,114 @@ private fun Browser(state: NetworkState, server: SmbServer, entry: FocusRequeste
         return
     }
 
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = 12.dp, bottom = 24.dp)) {
-        item {
-            Text(crumbs.joinToString("  ›  "), style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(24.dp, 16.dp, 24.dp, 4.dp))
-            SortRow(state, Modifier.padding(horizontal = 24.dp).horizontalScroll(rememberScrollState()))
+    // ----- phone: a grid or a list, chosen in the sheet the top bar's button opens -----
+    if (state.options) ViewSheet(state, onDismiss = { state.options = false })
+    val title: @Composable () -> Unit = {
+        Text(crumbs.joinToString("  ›  "), style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(24.dp, 12.dp, 24.dp, 4.dp))
+    }
+    val up: @Composable () -> Unit = { Column { // a grid cell would otherwise lay the row and its line on top of each other
+        ListItem(
+            headlineContent = { Text(if (path.isEmpty()) "All servers" else "Up") },
+            leadingContent = { Icon(Icons.Filled.ArrowUpward, null) },
+            modifier = Modifier.focusRequester(upRow).focusRing().clickable { state.up() },
+        )
+        HorizontalDivider()
+    } }
+    // loading, an error, or nothing to show
+    val message: (@Composable () -> Unit)? = when {
+        error != null -> ({
+            Column(Modifier.fillMaxWidth().padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("Couldn't open this", style = MaterialTheme.typography.titleMedium)
+                Text(error ?: "", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                OutlinedButton({ attempt++ }, Modifier.focusRing(PillShape)) { Text("Try again") }
+            }
+        })
+        entries == null -> ({ Box(Modifier.fillMaxWidth().padding(40.dp), Alignment.Center) { CircularProgressIndicator() } })
+        shown.isEmpty() -> ({ Text(nothing, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(24.dp)) })
+        else -> null
+    }
+
+    if (app.store.netGrid) {
+        val full: androidx.compose.foundation.lazy.grid.LazyGridItemSpanScope.() -> androidx.compose.foundation.lazy.grid.GridItemSpan =
+            { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }
+        androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
+            columns = androidx.compose.foundation.lazy.grid.GridCells.Adaptive(150.dp),
+            modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp),
+        ) {
+            item(span = full) { title() }
+            item(span = full) { up() }
+            if (message != null) item(span = full) { message() }
+            else itemsIndexed(shown, key = { _, e -> e.path }) { _, e ->
+                GridCell(e, isShare = path.isEmpty(), video = if (e.isDir) null else videoOf(e), progress = if (e.isDir) 0f else progressOf(app, videoOf(e))) { open(e) }
+            }
         }
-        item {
+        return
+    }
+
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
+        item { title() }
+        item { up() }
+        if (message != null) item { message() }
+        else itemsIndexed(shown, key = { _, e -> e.path }) { _, e ->
             ListItem(
-                headlineContent = { Text(if (path.isEmpty()) "All servers" else "Up") },
-                leadingContent = { Icon(Icons.Filled.ArrowUpward, null) },
-                modifier = Modifier.focusRequester(upRow).focusRing().clickable { state.up() },
+                headlineContent = { Text(e.name, maxLines = 2, overflow = TextOverflow.Ellipsis) },
+                supportingContent = if (e.isDir) null else ({ Text(videoOf(e).channel) }),
+                leadingContent = { Icon(entryIcon(e, path.isEmpty()), null) },
+                modifier = Modifier.focusRing().clickable { open(e) },
             )
-            HorizontalDivider()
         }
-        when {
-            error != null -> item {
-                Column(Modifier.fillMaxWidth().padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("Couldn't open this", style = MaterialTheme.typography.titleMedium)
-                    Text(error ?: "", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    OutlinedButton({ attempt++ }, Modifier.focusRing(PillShape)) { Text("Try again") }
+    }
+}
+
+private fun entryIcon(e: SmbEntry, isShare: Boolean) = when {
+    e.isDir -> if (isShare) Icons.Filled.Dns else Icons.Filled.Folder
+    isAudioFile(e.name) -> Icons.Filled.MusicNote
+    else -> Icons.Filled.Movie
+}
+
+/** One cell of the phone's grid: a video shows a frame from the file; a folder or a song shows its icon. */
+@Composable
+private fun GridCell(e: SmbEntry, isShare: Boolean, video: Video?, progress: Float, onClick: () -> Unit) {
+    Column(Modifier.focusRing().clickable(onClick = onClick).padding(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        if (video != null && !isAudioFile(e.name)) Thumb(video, Modifier.fillMaxWidth(), progress)
+        else Box(
+            Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(androidx.compose.foundation.shape.RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceContainerHigh),
+            Alignment.Center,
+        ) { Icon(entryIcon(e, isShare), null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(40.dp)) }
+        Text(e.name, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        if (video != null) Text(video.channel, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+/** View, filter and sort for the folders of a share, as a sheet from the bottom. Changes apply at once. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ViewSheet(state: NetworkState, onDismiss: () -> Unit) {
+    val store = LocalContext.current.tubeApp.store
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(Modifier.verticalScroll(rememberScrollState()).navigationBarsPadding().padding(bottom = 16.dp)) {
+            @Composable fun heading(text: String) = Text(text, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(24.dp, 12.dp, 24.dp, 4.dp))
+            @Composable fun chips(options: List<Pair<String, String>>, selected: String, pick: (String) -> Unit) =
+                Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 24.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    options.forEach { (value, label) -> FilterChip(selected = value == selected, onClick = { pick(value) }, label = { Text(label) }) }
                 }
-            }
-            entries == null -> item { Box(Modifier.fillMaxWidth().padding(40.dp), Alignment.Center) { CircularProgressIndicator() } }
-            sorted.isEmpty() -> item {
-                Text(if (path.isEmpty()) "This server shares nothing with this login." else "No folders or videos here.",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(24.dp))
-            }
-            else -> itemsIndexed(sorted, key = { _, e -> e.path }) { _, e ->
+            heading("View")
+            chips(listOf("grid" to "Grid", "list" to "List"), if (store.netGrid) "grid" else "list") { store.showNetGrid(it == "grid") }
+            heading("Show")
+            chips(listOf("all" to "All", "video" to "Videos", "audio" to "Music"), state.type) { state.type = it }
+            heading("Sort by")
+            listOf("name" to "Name", "date" to "Date", "size" to "Size").forEach { (key, label) ->
+                val on = state.sortKey == key
                 ListItem(
-                    headlineContent = { Text(e.name, maxLines = 2, overflow = TextOverflow.Ellipsis) },
-                    supportingContent = if (e.isDir) null else ({ Text(listOf(sizeText(e.size), dateText(e.modified)).filter { it.isNotBlank() }.joinToString(" · ")) }),
-                    leadingContent = {
-                        Icon(when { e.isDir -> if (path.isEmpty()) Icons.Filled.Dns else Icons.Filled.Folder; isAudioFile(e.name) -> Icons.Filled.MusicNote; else -> Icons.Filled.Movie }, null)
-                    },
-                    modifier = Modifier.focusRing().clickable { open(e) },
+                    headlineContent = { Text(label) },
+                    supportingContent = if (!on) null else ({
+                        Text(when (key) { "name" -> if (state.sortDesc) "Z to A" else "A to Z"; "date" -> if (state.sortDesc) "Newest first" else "Oldest first"; else -> if (state.sortDesc) "Largest first" else "Smallest first" })
+                    }),
+                    leadingContent = { RadioButton(on, null) },
+                    trailingContent = if (!on) null else ({ Icon(if (state.sortDesc) Icons.Filled.ArrowDownward else Icons.Filled.ArrowUpward, "Reverse") }),
+                    colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
+                    modifier = Modifier.clickable { state.sortBy(key) }, // pressing the chosen one reverses it
                 )
             }
         }

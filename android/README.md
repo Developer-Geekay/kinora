@@ -38,10 +38,14 @@ The phone and PC must be on the same Wi-Fi. `npm start` (no `lan`) keeps the ser
 
 ## What it does
 
-- Home (continue watching, playlists, recent), Search (or paste a link), Library (playlists and history), Settings.
+- Home (continue watching, playlists, recent), Search (or paste a link); History, Playlists and Settings are in the menu under More.
+  The top search box filters History, Playlists and the folder open on a network share, which also has a sheet for grid or
+  list view, file type and sorting.
 - Player: video or audio-only, seek bar, previous/next, queue (reorder, remove, save as playlist), full screen in landscape.
 - Defaults in Settings (stream type, quality up to 4K, autoplay, theme). The gear in the player overrides stream,
   quality, speed and autoplay for what is playing now, without changing your defaults.
+- Network files: the device's own decoders play the picture and sound; FFmpeg decoders (from the Jellyfin project,
+  GPL-3.0) add DTS, TrueHD, AC-3, E-AC-3 and ALAC audio. WMV and RMVB files can't be opened.
 - Resume where you stopped, watch history, playlists. All stored on the phone.
 - Keeps playing with the screen off. Notification and headset buttons control it.
 

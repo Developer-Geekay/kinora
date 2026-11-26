@@ -49,7 +49,6 @@ import app.kinora.ui.IconButton
 import app.kinora.ui.PullRefresh
 import app.kinora.ui.ShortsFeed
 import app.kinora.ui.ShortsScreen
-import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
@@ -79,7 +78,13 @@ import androidx.media3.common.util.UnstableApi
 import app.kinora.data.Video
 import app.kinora.player.Playback
 import app.kinora.ui.HomeScreen
-import app.kinora.ui.LibraryScreen
+import app.kinora.ui.FilterBar
+import app.kinora.ui.HistoryScreen
+import app.kinora.ui.PlaylistsScreen
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material3.LocalContentColor
 import app.kinora.ui.LocalPlay
 import app.kinora.ui.LocalPlayback
 import app.kinora.ui.MiniPlayer
@@ -177,6 +182,10 @@ private fun Root() {
     var tab by rememberSaveable { mutableStateOf(0) }
     var playerOpen by rememberSaveable { mutableStateOf(false) }
     var openPlaylist by rememberSaveable { mutableStateOf<String?>(null) }
+    // what is typed in the top bar of the screens that filter their own list
+    var historyQuery by rememberSaveable { mutableStateOf("") }
+    var playlistQuery by rememberSaveable { mutableStateOf("") }
+    var confirmClearHistory by remember { mutableStateOf(false) }
     var saving by remember { mutableStateOf<Video?>(null) }
     val search = remember { SearchState() }
     val net = remember { NetworkState() }
@@ -189,16 +198,22 @@ private fun Root() {
     BackHandler(shortsAt != null && !playerOpen) { shortsAt = null }
     BackHandler(drawer.isOpen) { uiScope.launch { drawer.close() } }
     BackHandler(playerOpen) { playerOpen = false }
-    BackHandler(!playerOpen && tab == 2 && openPlaylist != null) { openPlaylist = null }
-    BackHandler(!playerOpen && tab != 0 && !(tab == 2 && openPlaylist != null)) { tab = 0 }
-    BackHandler(!playerOpen && tab == 3 && net.canGoUp) { net.up() } // last, so it wins: Back goes up a folder before leaving the tab
+    BackHandler(!playerOpen && tab == 6 && openPlaylist != null) { openPlaylist = null }
+    BackHandler(!playerOpen && tab != 0 && !(tab == 6 && openPlaylist != null)) { tab = 0 }
+    BackHandler(!playerOpen && tab == 3 && net.canGoUp) { net.up() } // after the one above, so it wins: up a folder before leaving the tab
+    // and these win over both: Back first empties a filter
+    BackHandler(!playerOpen && tab == 2 && historyQuery.isNotEmpty()) { historyQuery = "" }
+    BackHandler(!playerOpen && tab == 6 && openPlaylist == null && playlistQuery.isNotEmpty()) { playlistQuery = "" }
+    BackHandler(!playerOpen && tab == 3 && net.query.isNotEmpty()) { net.query = "" }
+    // a filter is forgotten when you leave its screen
+    LaunchedEffect(tab) { if (tab != 2) historyQuery = ""; if (tab != 6) playlistQuery = ""; if (tab != 3) net.query = "" }
 
     val openSearch: (String) -> Unit = { q -> playerOpen = false; tab = 1; search.query = q; search.run(app, app.scope) }
     CompositionLocalProvider(LocalPlay provides play, LocalOpenSearch provides openSearch) {
         Box(Modifier.fillMaxSize()) {
             ModalNavigationDrawer(
                 drawerState = drawer,
-                gesturesEnabled = drawer.isOpen, // opened from the menu button; the edge swipe would fight the carousels
+                gesturesEnabled = drawer.isOpen, // opened from "More"; the edge swipe would fight the carousels
                 drawerContent = {
                     ModalDrawerSheet {
                         Row(Modifier.padding(24.dp, 28.dp, 16.dp, 20.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -206,7 +221,7 @@ private fun Root() {
                             Text("Kinora", Modifier.padding(start = 14.dp), style = MaterialTheme.typography.titleLarge)
                         }
                         listOf(Triple(0, Icons.Filled.Home, "Home"), Triple(5, Icons.Filled.SlowMotionVideo, "Shorts"), Triple(3, Icons.Filled.Dns, "Network"),
-                            Triple(2, Icons.Filled.VideoLibrary, "Library"), Triple(4, Icons.Filled.Settings, "Settings")).forEach { (id, icon, label) ->
+                            Triple(2, Icons.Filled.History, "History"), Triple(6, Icons.Filled.VideoLibrary, "Playlists"), Triple(4, Icons.Filled.Settings, "Settings")).forEach { (id, icon, label) ->
                             NavigationDrawerItem(
                                 label = { Text(label) }, icon = { Icon(icon, null) }, selected = tab == id,
                                 onClick = { tab = id; openPlaylist = null; uiScope.launch { drawer.close() } },
@@ -218,21 +233,33 @@ private fun Root() {
             ) {
             Scaffold(
                 topBar = {
-                    // The same top bar on every screen: menu button and search. Tapping the bar opens the search screen
-                    if (tab != 1) Row(
-                        Modifier.windowInsetsPadding(WindowInsets.statusBars).fillMaxWidth().padding(4.dp, 8.dp, 8.dp, 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        IconButton({ uiScope.launch { drawer.open() } }) { Icon(Icons.Filled.Menu, "Menu") }
-                        Row(
-                            Modifier.weight(1f).height(48.dp).clip(RoundedCornerShape(24.dp))
-                                .background(MaterialTheme.colorScheme.surfaceContainerHigh).clickable { tab = 1 }.padding(horizontal = 16.dp),
+                    // The top bar is a search box: on History, Playlists and inside a share it filters what is on the screen;
+                    // elsewhere tapping it opens the YouTube search. (The menu is under "More".)
+                    when {
+                        tab == 1 -> Unit // the search screen has its own box
+                        tab == 2 -> FilterBar(historyQuery, { historyQuery = it }, "Search watch history") {
+                            IconButton({ confirmClearHistory = true }, enabled = app.store.history.isNotEmpty()) { Icon(Icons.Filled.Delete, "Clear history") }
+                        }
+                        tab == 6 && openPlaylist == null -> FilterBar(playlistQuery, { playlistQuery = it }, "Search playlists")
+                        tab == 3 && net.server != null -> FilterBar(net.query, { net.query = it }, "Search this folder") {
+                            IconButton({ net.options = true }) {
+                                Icon(Icons.Filled.Tune, "Filter, sort and view", tint = if (net.type != "all") MaterialTheme.colorScheme.primary else LocalContentColor.current)
+                            }
+                        }
+                        else -> Row(
+                            Modifier.windowInsetsPadding(WindowInsets.statusBars).fillMaxWidth().padding(12.dp, 8.dp, 8.dp, 4.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Icon(Icons.Filled.Search, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text("Search YouTube", Modifier.padding(start = 12.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Row(
+                                Modifier.weight(1f).height(48.dp).clip(RoundedCornerShape(24.dp))
+                                    .background(MaterialTheme.colorScheme.surfaceContainerHigh).clickable { tab = 1 }.padding(horizontal = 16.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Icon(Icons.Filled.Search, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text("Search YouTube", Modifier.padding(start = 12.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            if (tab == 0) IconButton({ app.feed.refresh(force = true) }, enabled = !app.feed.loading) { Icon(Icons.Filled.Refresh, "Refresh suggestions") }
                         }
-                        if (tab == 0) IconButton({ app.feed.refresh(force = true) }, enabled = !app.feed.loading) { Icon(Icons.Filled.Refresh, "Refresh suggestions") }
                     }
                 },
                 bottomBar = {
@@ -243,9 +270,9 @@ private fun Root() {
                                 .forEach { (id, icon, label) ->
                                     NavigationBarItem(selected = tab == id, onClick = { tab = id; openPlaylist = null }, icon = { Icon(icon, label) }, label = { Text(label) })
                                 }
-                            // the side menu has every destination, including Library and Settings
+                            // the side menu has every destination, including History, Playlists and Settings
                             NavigationBarItem(
-                                selected = tab == 2 || tab == 4, onClick = { uiScope.launch { drawer.open() } },
+                                selected = tab == 2 || tab == 4 || tab == 6, onClick = { uiScope.launch { drawer.open() } },
                                 icon = { Icon(Icons.Filled.MoreHoriz, "More") },
                                 label = { Text("More") },
                             )
@@ -255,9 +282,10 @@ private fun Root() {
             ) { padding ->
                 Box(Modifier.padding(padding)) {
                     when (tab) {
-                        0 -> PullRefresh(app.feed.loading, { app.feed.refresh(force = true) }) { HomeScreen(onSave = { saving = it }, openPlaylist = { openPlaylist = it; tab = 2 }) }
+                        0 -> PullRefresh(app.feed.loading, { app.feed.refresh(force = true) }) { HomeScreen(onSave = { saving = it }, openPlaylist = { openPlaylist = it; tab = 6 }) }
                         1 -> SearchScreen(search, onSave = { saving = it })
-                        2 -> LibraryScreen(openPlaylist, { openPlaylist = it }, onSave = { saving = it })
+                        2 -> HistoryScreen(historyQuery, confirmClearHistory, onClearDone = { confirmClearHistory = false }, onSave = { saving = it })
+                        6 -> PlaylistsScreen(playlistQuery, openPlaylist, { openPlaylist = it }, onSave = { saving = it })
                         3 -> NetworkScreen(net)
                         5 -> PullRefresh(shorts.loading, { shorts.load(app, app.scope, force = true) }) { ShortsScreen(shorts, onOpen = { shortsAt = it }) }
                         else -> SettingsScreen(onChangeServer = { configured = false })

@@ -5,6 +5,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.setValue
 import org.json.JSONArray
 import org.json.JSONObject
@@ -43,6 +44,8 @@ class Store(ctx: Context) {
     var recsSince by androidx.compose.runtime.mutableLongStateOf(sp.getLong("recsSince", 0L)); private set
     fun resetRecommendations() { recsSince = System.currentTimeMillis(); sp.edit().putLong("recsSince", recsSince).apply() }
     var layout by mutableStateOf(sp.getString("layout", "auto") ?: "auto") // auto | phone | tv
+    var netGrid by mutableStateOf(sp.getBoolean("netGrid", false)); private set // folders on a share: grid or list (phone)
+    fun showNetGrid(grid: Boolean) { netGrid = grid; sp.edit().putBoolean("netGrid", grid).apply() }
 
     val smbServers = mutableStateListOf<SmbServer>().also { it.addAll(readList("smb") { o -> SmbServer.fromJson(o) }) }
     val history = mutableStateListOf<HistoryEntry>().also { it.addAll(readList("history") { o -> HistoryEntry.fromJson(o) }) }
@@ -113,11 +116,25 @@ class Store(ctx: Context) {
     private fun persistPlaylists() = sp.edit().putString("playlists", JSONArray().also { a -> playlists.forEach { a.put(it.toJson()) } }.toString()).apply()
 
     // ----- resume positions (seconds) -----
-    fun resumeSec(id: String): Int = positions[id] ?: 0
+    private var removals by mutableIntStateOf(0) // bumped so screens that read positions redraw when some are removed
+    fun resumeSec(id: String): Int = if (removals >= 0) positions[id] ?: 0 else 0
+
+    /** Started and not finished, newest first. */
+    fun continueWatching(): List<Video> =
+        history.filter { !it.done && resumeSec(it.video.id) > 15 && it.video.duration > 0 }.map { it.video }
+
+    /** Take videos off "Continue watching": where you stopped is forgotten, the history entry stays. */
+    fun forgetPositions(ids: List<String>) {
+        ids.forEach { positions.remove(it) }
+        persistPositions()
+        removals++
+    }
+
+    private fun persistPositions() = sp.edit().putString("positions", JSONObject(positions as Map<*, *>).toString()).apply()
 
     fun savePosition(id: String, sec: Int, durationSec: Long) {
         if (sec > 15 && (durationSec <= 0 || sec < durationSec - 20)) positions[id] = sec else positions.remove(id)
-        sp.edit().putString("positions", JSONObject(positions as Map<*, *>).toString()).apply()
+        persistPositions()
     }
 
     private fun <T> readList(key: String, parse: (JSONObject) -> T): List<T> = runCatching {

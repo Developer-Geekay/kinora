@@ -6,7 +6,6 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.BaseDataSource
 import androidx.media3.datasource.DataSpec
 import app.kinora.TubeApp
-import jcifs.smb.SmbFile
 import jcifs.smb.SmbRandomAccessFile
 import java.io.IOException
 
@@ -32,10 +31,9 @@ class SmbDataSource(private val app: TubeApp) : BaseDataSource(/* isNetwork = */
         val server = u.userInfo?.let { app.smb.server(it) } ?: throw IOException("That server was removed.")
         val path = (u.path ?: "").trim('/')
         fun openOnce() {
-            val ctx = app.smb.context(server)
-            val url = app.smb.url(server, path, dir = false)
-            val length = SmbFile(url, ctx).length()
-            val raf = SmbRandomAccessFile(url, "r", 1 /* FILE_SHARE_READ */, ctx)
+            val source = app.smb.file(server, path, dir = false)
+            val length = source.length()
+            val raf = source.openRandomAccess("r", 1 /* FILE_SHARE_READ */)
             file = raf
             raf.seek(dataSpec.position)
             remaining = if (dataSpec.length != C.LENGTH_UNSET.toLong()) dataSpec.length else (length - dataSpec.position).coerceAtLeast(0)

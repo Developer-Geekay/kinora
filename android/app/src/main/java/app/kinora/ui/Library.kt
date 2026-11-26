@@ -35,13 +35,10 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
-import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -64,39 +61,36 @@ import java.util.Locale
 
 private val QUALITIES = listOf(360, 480, 720, 1080, 1440, 2160)
 
-/** Playlists and watch history. [openId] is the playlist being viewed, if any. */
+/** Your playlists, filtered by [query]; [openId] is the one being viewed, if any. */
 @Composable
 @UnstableApi
-fun LibraryScreen(openId: String?, setOpenId: (String?) -> Unit, onSave: (Video) -> Unit) {
+fun PlaylistsScreen(query: String, openId: String?, setOpenId: (String?) -> Unit, onSave: (Video) -> Unit) {
     val app = LocalContext.current.tubeApp
-    var tab by rememberSaveable { mutableIntStateOf(0) }
     val open = openId?.let { id -> app.store.playlists.firstOrNull { it.id == id } }
     if (open != null) { PlaylistDetail(open, onBack = { setOpenId(null) }, onSave = onSave); return }
-
     Column(Modifier.fillMaxSize()) {
-        Text("Library", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(20.dp, 20.dp, 20.dp, 8.dp))
-        TabRow(selectedTabIndex = tab) {
-            Tab(tab == 0, { tab = 0 }, text = { Text("Playlists") })
-            Tab(tab == 1, { tab = 1 }, text = { Text("History") })
-        }
-        if (tab == 0) PlaylistsTab(setOpenId) else HistoryTab(onSave)
+        Text("Playlists", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(20.dp, 16.dp, 20.dp, 8.dp))
+        PlaylistList(query, setOpenId)
     }
 }
 
 @Composable
 @UnstableApi
-private fun PlaylistsTab(open: (String?) -> Unit) {
+private fun PlaylistList(query: String, open: (String?) -> Unit) {
     val store = LocalContext.current.tubeApp.store
     val play = LocalPlay.current
     var creating by remember { mutableStateOf(false) }
     if (creating) NameDialog("New playlist", confirm = "Create", onDismiss = { creating = false }) { open(store.createPlaylist(it).id) }
 
     androidx.compose.foundation.layout.Box(Modifier.fillMaxSize()) {
+        val shown = store.playlists.filter { query.isBlank() || it.name.contains(query.trim(), true) }
         if (store.playlists.isEmpty()) {
             EmptyState("No playlists yet", "Use “Save to playlist” on any video, or create one here.")
+        } else if (shown.isEmpty()) {
+            EmptyState("No matches", "No playlist has that in its name.")
         } else {
             LazyColumn(contentPadding = PaddingValues(bottom = 88.dp)) {
-                items(store.playlists.toList(), key = { it.id }) { p ->
+                items(shown, key = { it.id }) { p ->
                     ListItem(
                         headlineContent = { Text(p.name) },
                         supportingContent = { Text("${p.items.size} video${if (p.items.size == 1) "" else "s"}") },
@@ -180,26 +174,22 @@ private fun dayLabel(ms: Long): String {
 
 @Composable
 @UnstableApi
-private fun HistoryTab(onSave: (Video) -> Unit) {
+fun HistoryScreen(query: String, confirmClear: Boolean, onClearDone: () -> Unit, onSave: (Video) -> Unit) {
     val app = LocalContext.current.tubeApp
     val store = app.store
     val play = LocalPlay.current
-    var filter by rememberSaveable { mutableStateOf("") }
-    var confirmClear by remember { mutableStateOf(false) }
     if (confirmClear) AlertDialog(
-        onDismissRequest = { confirmClear = false },
+        onDismissRequest = onClearDone,
         title = { Text("Clear watch history?") },
         text = { Text("This removes the list of videos you've played. Where you stopped in each video is kept.") },
-        confirmButton = { TextButton({ store.clearHistory(); confirmClear = false }) { Text("Clear") } },
-        dismissButton = { TextButton({ confirmClear = false }) { Text("Cancel") } },
+        confirmButton = { TextButton({ store.clearHistory(); onClearDone() }) { Text("Clear") } },
+        dismissButton = { TextButton(onClearDone) { Text("Cancel") } },
     )
 
-    val rows = store.history.filter { filter.isBlank() || it.video.title.contains(filter, true) || it.video.channel.contains(filter, true) }
+    val q = query.trim()
+    val rows = store.history.filter { q.isEmpty() || it.video.title.contains(q, true) || it.video.channel.contains(q, true) }
     Column(Modifier.fillMaxSize()) {
-        Row(Modifier.fillMaxWidth().padding(16.dp, 8.dp, 8.dp, 0.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-            OutlinedTextField(filter, { filter = it }, label = { Text("Search watch history") }, singleLine = true, modifier = Modifier.weight(1f))
-            IconButton({ if (store.history.isNotEmpty()) confirmClear = true }) { Icon(Icons.Filled.Delete, "Clear history") }
-        }
+        Text("History", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(20.dp, 16.dp, 20.dp, 4.dp))
         if (!store.saveHistory) Text("Watch history is turned off in Settings.", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(16.dp, 8.dp))
         if (rows.isEmpty()) {
             EmptyState(if (store.history.isEmpty()) "Nothing here yet" else "No matches", if (store.history.isEmpty()) "Videos you play will be listed here, newest first." else "Nothing in your history matches that.")

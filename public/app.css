@@ -607,7 +607,7 @@ body[data-route="network"] .page { max-width: 1180px; }
 
 
 /* ---------- phone shell: bottom bar (Home, Shorts, Music, More) + slide-in side menu, like the Android app ---------- */
-.menubtn, .ri-more, .scrim, .drawer { display: none; }
+.ri-more, .scrim, .drawer { display: none; }
 @media (max-width: 800px) {
   .ri-x { display: none; }
   .ri-more { display: flex; }
@@ -619,7 +619,6 @@ body[data-route="network"] .page { max-width: 1180px; }
   .rail .ri { padding-bottom: 8px; }
   body:not([data-route="watch"]) main { padding-bottom: 96px; }
   .fab, body:not([data-route="watch"]) .fab { bottom: 88px; }
-  .menubtn { display: inline-grid; flex: none; color: var(--on-surface); }
   .scrim { display: block; position: fixed; inset: 0; z-index: 80; background: rgba(0,0,0,.5); opacity: 0; transition: opacity .25s var(--ease); }
   .scrim[hidden] { display: none; }
   .scrim.open { opacity: 1; }
@@ -633,7 +632,5 @@ body[data-route="network"] .page { max-width: 1180px; }
   .di { display: flex; align-items: center; gap: 12px; height: 56px; padding: 0 16px; border-radius: 28px; color: var(--on-surface-var); font: 500 15px/20px var(--font); }
   .di svg.i { width: 24px; height: 24px; flex: none; }
   .di.on { background: var(--secondary-container); color: var(--on-secondary-container); }
-  body[data-route="watch"] .menubtn { display: none; }
 }
-@media (max-width: 600px) { .appbar { padding-left: 4px; } }
 @media (prefers-reduced-motion: reduce) { .drawer, .scrim { transition: none; } }

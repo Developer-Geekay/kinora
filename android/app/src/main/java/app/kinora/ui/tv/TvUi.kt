@@ -88,6 +88,8 @@ import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.nativeKeyCode
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -192,6 +194,7 @@ fun TvRoot(onChangeServer: () -> Unit) {
     var confirmExit by remember { mutableStateOf(false) }
     var backToRail by remember { mutableStateOf(false) } // the exit question was cancelled
     val activity = LocalContext.current as? android.app.Activity
+    val editing = remember { ContinueEditing() } // removing things from "Continue watching"
 
     val play: (List<Video>, Int) -> Unit = { videos, i -> pb.playQueue(videos, i); playerOpen = true }
 
@@ -242,7 +245,7 @@ fun TvRoot(onChangeServer: () -> Unit) {
                 )
                 Box(Modifier.weight(1f).fillMaxHeight()) {
                     when (tab) {
-                        0 -> TvHome(entry, onSave = { saving = it }, goSearch = { tab = 1 })
+                        0 -> TvHome(entry, editing, onSave = { saving = it }, goSearch = { tab = 1 })
                         1 -> TvSearch(search, entry, onSave = { saving = it })
                         2 -> TvLibrary(entry, onSave = { saving = it }, goSearch = { tab = 1 })
                         3 -> NetworkScreen(net, entry)
@@ -257,11 +260,44 @@ fun TvRoot(onChangeServer: () -> Unit) {
                     TvPlayerScreen(onClose = closePlayer, onSave = { saving = it })
                 }
             }
-            saving?.let { SaveToPlaylistDialog(it) { saving = null } }
-            if (confirmExit) ExitConfirm(
-                onStay = { confirmExit = false; backToRail = true },
-                onExit = { confirmExit = false; activity?.finish() },
-            )
+            saving?.let {
+                SaveToPlaylistDialog(it) { saving = null; editing.afterSave?.let { id -> editing.focusOn = id }; editing.afterSave = null }
+            }
+            editing.menuFor?.let { v ->
+                val close = { editing.menuFor = null; editing.focusOn = v.id }
+                TvDialog(
+                    v.title, null, onDismiss = close, stacked = true,
+                    buttons = listOf(
+                        "Remove from Continue watching" to {
+                            val list = app.store.continueWatching()
+                            val i = list.indexOfFirst { it.id == v.id }
+                            val next = list.getOrNull(i + 1) ?: list.getOrNull(i - 1)
+                            app.store.forgetPositions(listOf(v.id))
+                            editing.menuFor = null; editing.focusOn = next?.id.orEmpty()
+                        },
+                        "Remove all" to { editing.menuFor = null; editing.askAllFrom = v.id },
+                        "Save to playlist" to { editing.menuFor = null; editing.afterSave = v.id; saving = v },
+                        "Cancel" to close,
+                    ),
+                )
+            }
+            editing.askAllFrom?.let { from ->
+                val close = { editing.askAllFrom = null; editing.focusOn = from }
+                TvDialog(
+                    "Remove all?", "Continue watching is emptied. Your watch history stays.", onDismiss = close,
+                    buttons = listOf(
+                        "Cancel" to close,
+                        "Remove all" to { app.store.forgetPositions(app.store.continueWatching().map { it.id }); editing.askAllFrom = null; editing.focusOn = "" },
+                    ),
+                )
+            }
+            if (confirmExit) {
+                val stay = { confirmExit = false; backToRail = true }
+                TvDialog(
+                    "Exit Kinora?", "Playback stops when you leave.", onDismiss = stay,
+                    buttons = listOf("Cancel" to stay, "Exit" to { confirmExit = false; activity?.finish() }),
+                )
+            }
         }
     }
 }
@@ -348,9 +384,10 @@ private fun TvRailItem(
 @Composable
 internal fun TvCard(
     video: Video, progress: Float, onClick: () -> Unit, onMenu: () -> Unit,
-    modifier: Modifier = Modifier, width: Dp? = 250.dp,
+    modifier: Modifier = Modifier, width: Dp? = 250.dp, onHold: (() -> Unit)? = null,
 ) {
     var focused by remember { mutableStateOf(false) }
+    var held by remember { mutableStateOf(false) } // OK is being held down
     val myRequester = remember { FocusRequester() }
     val memory = LocalFocusMemory.current
     val scale by animateFloatAsState(if (focused) 1.06f else 1f, label = "cardScale")
@@ -364,6 +401,16 @@ internal fun TvCard(
             .onFocusChanged { focused = it.hasFocus; if (it.hasFocus) memory.last = myRequester }
             .onKeyEvent { e ->
                 if (e.key == Key.Menu && e.type == KeyEventType.KeyUp) { onMenu(); true } else false
+            }
+            .onPreviewKeyEvent { e ->
+                val ok = e.key == Key.DirectionCenter || e.key == Key.Enter || e.key == Key.NumPadEnter
+                when {
+                    onHold == null || !ok -> false
+                    e.type == KeyEventType.KeyDown && e.nativeKeyEvent.repeatCount > 0 -> { held = true; true }
+                    // acted on when the key is let go: a menu opened while it is still down would receive that release
+                    e.type == KeyEventType.KeyUp && held -> { held = false; onHold(); true }
+                    else -> false
+                }
             }
             .clip(shape)
             .background(if (focused) scheme.surfaceContainerHighest else Color.Transparent)
@@ -380,19 +427,30 @@ internal fun TvCard(
 }
 
 @Composable
-private fun TvRow(title: String, videos: List<Video>, onSave: (Video) -> Unit, entry: FocusRequester? = null) {
+private fun TvRow(
+    title: String, videos: List<Video>, onSave: (Video) -> Unit, entry: FocusRequester? = null,
+    hint: String? = null, onOptions: ((Video) -> Unit)? = null, // holding OK, or Menu, on a card of this row
+    focusOn: String? = null, target: FocusRequester? = null, // the card [target] should point at
+) {
     val app = LocalContext.current.tubeApp
     val play = LocalPlay.current
     Column {
-        Text(title, style = TvType.section, modifier = Modifier.padding(start = 44.dp, top = 6.dp))
+        Row(Modifier.padding(start = 44.dp, top = 6.dp), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            Text(title, style = TvType.section)
+            if (hint != null) Text(hint, style = TvType.meta, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 3.dp))
+        }
         LazyRow(
             contentPadding = PaddingValues(horizontal = 36.dp, vertical = 16.dp), // room for the focused card to grow into
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             itemsIndexed(videos, key = { i, v -> "$i-${v.id}" }) { i, v ->
+                var card: Modifier = if (i == 0 && entry != null) Modifier.focusRequester(entry) else Modifier
+                if (target != null && v.id == focusOn) card = card.focusRequester(target)
                 TvCard(
-                    v, progressOf(app, v), onClick = { play(videos, i) }, onMenu = { onSave(v) },
-                    modifier = if (i == 0 && entry != null) Modifier.focusRequester(entry) else Modifier,
+                    v, progressOf(app, v), onClick = { play(videos, i) },
+                    onMenu = { if (onOptions != null) onOptions(v) else onSave(v) },
+                    onHold = onOptions?.let { options -> { options(v) } },
+                    modifier = card,
                 )
             }
         }
@@ -413,11 +471,20 @@ private fun TvEmpty(title: String, text: String, button: String, entry: FocusReq
 // ---------------------------------------------------------------------------------------------------------------------
 
 @Composable
-private fun TvHome(entry: FocusRequester, onSave: (Video) -> Unit, goSearch: () -> Unit) {
+private fun TvHome(entry: FocusRequester, editing: ContinueEditing, onSave: (Video) -> Unit, goSearch: () -> Unit) {
     val app = LocalContext.current.tubeApp
     val feed = app.feed
     val history = app.store.history
-    val resumable = history.filter { !it.done && app.store.resumeSec(it.video.id) > 15 && it.video.duration > 0 }.map { it.video }.take(12)
+    val resumable = app.store.continueWatching().take(12)
+    // after a menu or a removal, the remote goes back to a card of "Continue watching", else to the top of the screen
+    val target = remember { FocusRequester() }
+    LaunchedEffect(editing.focusOn) {
+        val want = editing.focusOn ?: return@LaunchedEffect
+        delay(200) // after the closing menu has left the screen
+        val card = resumable.any { it.id == want }
+        runCatching { (if (card) target else entry).requestFocus() }
+        editing.focusOn = null
+    }
     LaunchedEffect(history.firstOrNull()?.video?.id, app.store.source) { feed.refresh() }
 
     val rec = feed.recommended
@@ -433,7 +500,12 @@ private fun TvHome(entry: FocusRequester, onSave: (Video) -> Unit, goSearch: () 
                 Text("Kinora", style = TvType.wordmark, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.padding(start = 14.dp))
             }
         }
-        if (resumable.isNotEmpty()) item { TvRow("Continue watching", resumable, onSave, entry = entry.takeIf { firstRow == 0 }) }
+        if (resumable.isNotEmpty()) item {
+            TvRow(
+                "Continue watching", resumable, onSave, entry = entry.takeIf { firstRow == 0 },
+                hint = "Hold OK or press Menu to remove", onOptions = { editing.menuFor = it }, focusOn = editing.focusOn, target = target,
+            )
+        }
         if (rec.isNotEmpty()) {
             val title = if (history.any { !it.video.isLocal }) "Recommended for you" else "Popular right now"
             item { TvRow(title, rec.take(14), onSave, entry = entry.takeIf { firstRow == 1 }) }
@@ -463,16 +535,24 @@ private fun TvLibrary(entry: FocusRequester, onSave: (Video) -> Unit, goSearch: 
     }
 }
 
+/** What is being done to "Continue watching" on the TV. */
+private class ContinueEditing {
+    var menuFor by mutableStateOf<Video?>(null)       // the card whose options are open
+    var askAllFrom by mutableStateOf<String?>(null)   // "Remove all?" is open, asked from this card
+    var afterSave: String? = null                     // the card to return to when "Save to playlist" closes
+    var focusOn by mutableStateOf<String?>(null)      // a card's id to focus ("" = the top of the screen)
+}
+
 /**
- * "Exit Kinora?" over the whole screen. Drawn as part of the TV screen, not as a system dialog: a dialog window ignores
- * the TV layout's scale (see [TvRoot]) and came out oversized.
+ * A question or a short menu over the whole screen. Drawn as part of the TV screen, not as a system dialog: a dialog
+ * window ignores the TV layout's scale (see [TvRoot]) and came out oversized. The first button gets the focus.
  */
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
-private fun ExitConfirm(onStay: () -> Unit, onExit: () -> Unit) {
-    val stay = remember { FocusRequester() }
-    LaunchedEffect(Unit) { runCatching { stay.requestFocus() } }
-    BackHandler(true) { onStay() }
+private fun TvDialog(title: String, message: String?, onDismiss: () -> Unit, buttons: List<Pair<String, () -> Unit>>, stacked: Boolean = false) {
+    val first = remember { FocusRequester() }
+    LaunchedEffect(title) { runCatching { first.requestFocus() } }
+    BackHandler(true) { onDismiss() }
     Box(
         Modifier.fillMaxSize().background(Color(0xCC000000))
             .focusProperties { exit = { FocusRequester.Cancel } } // nothing underneath may take focus
@@ -483,18 +563,19 @@ private fun ExitConfirm(onStay: () -> Unit, onExit: () -> Unit) {
             Modifier.width(420.dp).clip(RoundedCornerShape(20.dp)).background(Color(0xFF212121)).padding(horizontal = 32.dp, vertical = 28.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Text("Exit Kinora?", style = TvType.section, color = Color.White)
-            Text("Playback stops when you leave.", style = TvType.cardTitle.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Normal), color = Color(0xB3FFFFFF),
-                modifier = Modifier.padding(top = 8.dp))
-            Row(Modifier.fillMaxWidth().padding(top = 24.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                DialogButton("Cancel", Modifier.weight(1f).focusRequester(stay), onStay)
-                DialogButton("Exit", Modifier.weight(1f), onExit)
+            Text(title, style = TvType.section, color = Color.White, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+            if (message != null) Text(message, style = TvType.cardTitle.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Normal), color = Color(0xB3FFFFFF),
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.padding(top = 8.dp))
+            if (stacked) Column(Modifier.fillMaxWidth().padding(top = 24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                buttons.forEachIndexed { i, (text, run) -> DialogButton(text, Modifier.fillMaxWidth().then(if (i == 0) Modifier.focusRequester(first) else Modifier), run) }
+            } else Row(Modifier.fillMaxWidth().padding(top = 24.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                buttons.forEachIndexed { i, (text, run) -> DialogButton(text, Modifier.weight(1f).then(if (i == 0) Modifier.focusRequester(first) else Modifier), run) }
             }
         }
     }
 }
 
-/** The player's focus language: the focused pill is white with dark text, the other sits quietly on the card. */
+/** The player's focus language: the focused pill is white with dark text, the others sit quietly on the card. */
 @Composable
 private fun DialogButton(text: String, modifier: Modifier, onClick: () -> Unit) {
     var focused by remember { mutableStateOf(false) }

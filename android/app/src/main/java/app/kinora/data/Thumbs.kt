@@ -7,8 +7,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.setValue
 import app.kinora.TubeApp
-import jcifs.smb.SmbFile
-import jcifs.smb.SmbRandomAccessFile
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -51,10 +49,9 @@ class Thumbs(private val app: TubeApp) {
     private fun generate(v: Video): Boolean = runCatching {
         val (serverId, path) = parseSmbId(v.id) ?: return false
         val server = app.smb.server(serverId) ?: return false
-        val ctx = app.smb.context(server)
-        val url = app.smb.url(server, path, dir = false)
-        val length = SmbFile(url, ctx).length()
-        val raf = SmbRandomAccessFile(url, "r", 1, ctx)
+        val file = app.smb.file(server, path, dir = false)
+        val length = file.length()
+        val raf = file.openRandomAccess("r", 1)
         val source = object : MediaDataSource() {
             private var start = -1L
             private val block = ByteArray(1 shl 20)

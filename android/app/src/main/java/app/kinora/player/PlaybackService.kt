@@ -8,6 +8,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.LibraryResult
 import androidx.media3.session.MediaLibraryService
@@ -53,7 +54,13 @@ class PlaybackService : MediaLibraryService() {
 
         val smbData = DataSource.Factory { SmbDataSource(app) }
 
-        val exo = ExoPlayer.Builder(this)
+        // The device's own decoders come first; the FFmpeg ones (see build.gradle.kts) take the audio it has no decoder for,
+        // and if a decoder fails to start, the next one is tried.
+        val renderers = DefaultRenderersFactory(this)
+            .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
+            .setEnableDecoderFallback(true)
+
+        val exo = ExoPlayer.Builder(this, renderers)
             .setMediaSourceFactory(TubeMediaSourceFactory(pcHttp, deviceHttp, smbData))
             .setAudioAttributes(
                 AudioAttributes.Builder().setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).setUsage(C.USAGE_MEDIA).build(),

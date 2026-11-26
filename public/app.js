@@ -131,6 +131,16 @@ function recordHistory(item) {
   store.set('history', history);
 }
 function markDone(id) { const h = histOf(id); if (h) { h.done = true; store.set('history', history); } }
+// started and not finished, newest first
+const continueWatching = () => history.filter(h => !h.done && posMap[h.id] > 15 && h.duration);
+const continueIds = () => continueWatching().map(h => h.id);
+// off "Continue watching": where you stopped is forgotten, the history entry stays
+function forgetPositions(ids, message) {
+  const old = ids.map(id => [id, posMap[id]]);
+  for (const id of ids) delete posMap[id];
+  store.set('pos', posMap); refreshView();
+  toast(message, { label: 'Undo', fn: () => { for (const [id, p] of old) posMap[id] = p; store.set('pos', posMap); refreshView(); } });
+}
 
 /* ================= snackbar + ripple ================= */
 let toastTimer = 0;
@@ -168,19 +178,18 @@ const watchPath = id => `/watch?v=${id}` + (queue.source?.type === 'playlist' ? 
 function openVideo(item) { stash(item); nav(`/watch?v=${item.id}`); }
 addEventListener('hashchange', route);
 
-/* phone side menu: opened by the hamburger or the bottom bar's More; closes on scrim, Escape, a left swipe or navigation */
+/* phone side menu: opened by the bottom bar's More; closes on scrim, Escape, a left swipe or navigation */
 const drawerEl = $('#drawer'), scrimEl = $('#scrim');
 function openDrawer() {
-  scrimEl.hidden = false; drawerEl.setAttribute('aria-hidden', 'false'); $('#menuBtn').setAttribute('aria-expanded', 'true');
+  scrimEl.hidden = false; drawerEl.setAttribute('aria-hidden', 'false'); $('#moreBtn').setAttribute('aria-expanded', 'true');
   requestAnimationFrame(() => { scrimEl.classList.add('open'); drawerEl.classList.add('open'); });
   const first = drawerEl.querySelector('.di.on') || drawerEl.querySelector('.di'); if (first) first.focus({ preventScroll: true });
 }
 function closeDrawer() {
   if (!drawerEl.classList.contains('open')) return;
-  drawerEl.classList.remove('open'); scrimEl.classList.remove('open'); drawerEl.setAttribute('aria-hidden', 'true'); $('#menuBtn').setAttribute('aria-expanded', 'false');
+  drawerEl.classList.remove('open'); scrimEl.classList.remove('open'); drawerEl.setAttribute('aria-hidden', 'true'); $('#moreBtn').setAttribute('aria-expanded', 'false');
   setTimeout(() => { if (!drawerEl.classList.contains('open')) scrimEl.hidden = true; }, 260);
 }
-$('#menuBtn').addEventListener('click', openDrawer);
 $('#moreBtn').addEventListener('click', openDrawer);
 scrimEl.addEventListener('click', closeDrawer);
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDrawer(); });
@@ -915,6 +924,8 @@ function itemMenu(item, ctx = {}) {
     } });
   } else if (ctx.where === 'history') {
     m.push('-', { label: 'Remove from history', icon: 'delete', danger: true, fn: () => removeHistory(item.id) });
+  } else if (ctx.where === 'continue') {
+    m.push('-', { label: 'Remove from Continue watching', icon: 'delete', danger: true, fn: () => forgetPositions([item.id], 'Removed from Continue watching') });
   }
   return m;
 }
@@ -1127,14 +1138,22 @@ function viewHome() {
   return page((root, setRefresh) => {
     const draw = () => {
       root.textContent = '';
-      const cont = history.filter(h => !h.done && posMap[h.id] > 15 && h.duration).slice(0, 8);
+      const cont = continueWatching().slice(0, 8);
       if (!history.length) {
         const hero = el('div', 'hero'); hero.append(el('h1', '', 'What are we watching?'), el('p', '', 'Search above or paste a YouTube link. It plays here without ads and remembers where you stopped.'));
         const hint = el('div', 'hint');
         for (const [k, t] of [['/', 'search'], ['Space', 'play'], ['J L', '±10s'], ['T', 'theater'], ['C', 'subtitles'], ['A', 'audio only']]) { const s = el('span'); s.append(el('span', 'kbd', k), document.createTextNode(t)); hint.append(s); }
         hero.append(hint); root.append(hero);
       }
-      if (cont.length) { const s = el('section', 'section'); s.append(el('h2', '', 'Continue watching')); const g = el('div', 'ggrid'); g.append(...cont.map(h => gcard(h, { where: 'home' }, () => openVideo(h)))); s.append(g); root.append(s); }
+      if (cont.length) {
+        const s = el('section', 'section'), head = el('h2', '', 'Continue watching');
+        head.append(button('btn text sm has-icon', 'Remove all', 'delete', () => confirmDialog({
+          title: 'Remove all from Continue watching?', text: 'Where you stopped is forgotten. Your watch history stays.', confirm: 'Remove all',
+          fn: () => forgetPositions(continueIds(), 'Continue watching cleared'),
+        })));
+        const g = el('div', 'ggrid'); g.append(...cont.map(h => gcard(h, { where: 'continue' }, () => openVideo(h))));
+        s.append(head, g); root.append(s);
+      }
 
       const chips = el('div', 'chips');
       chips.append(button('chipb on', 'All', null, () => {}));

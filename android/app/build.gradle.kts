@@ -73,6 +73,9 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer-hls:$media3") // live streams are HLS playlists
     implementation("androidx.media3:media3-session:$media3")
     implementation("androidx.media3:media3-ui:$media3")
+    // Software audio decoders (FFmpeg) for what a device can't decode itself: DTS, TrueHD, AC-3, E-AC-3, ALAC.
+    // Built by the Jellyfin project, GPL-3.0. Its version must match media3's.
+    implementation("org.jellyfin.media3:media3-ffmpeg-decoder:$media3+2")
 
     implementation("io.coil-kt:coil-compose:2.6.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")

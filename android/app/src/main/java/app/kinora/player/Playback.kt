@@ -157,7 +157,8 @@ class Playback(private val app: TubeApp) {
 
         override fun onPlayerError(e: PlaybackException) {
             starting = false
-            error = "That video didn't play. ${e.errorCodeName.replace('_', ' ').lowercase()}"
+            val why = e.cause?.message?.takeIf { it.isNotBlank() }?.take(160)
+            error = "That video didn't play. ${e.errorCodeName.removePrefix("ERROR_CODE_").replace('_', ' ').lowercase()}" + (why?.let { ": $it" } ?: "")
         }
     }
 

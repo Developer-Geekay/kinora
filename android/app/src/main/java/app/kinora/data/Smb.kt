@@ -97,14 +97,14 @@ class SmbSource(private val store: Store) {
     }
 
     /**
-     * smb://host/share/folder/ for jcifs; a folder ends with a slash. jcifs wants the names as they are (spaces, +, &, brackets
-     * and so on): percent-escaping them made it look for a file literally called "a%20b". Only the three characters a URL itself
-     * would trip on are escaped.
+     * The file or folder at [path] ("share/folder/file.mkv"; "" = the server itself). A folder's name ends with a slash.
+     * The path is handed to jcifs as a name relative to the server, exactly as it is: in a full smb:// address "#" and "?"
+     * cut the name short, and percent-escaping made jcifs look for a file literally called "a%23b".
      */
-    fun url(s: SmbServer, path: String, dir: Boolean): String {
+    fun file(s: SmbServer, path: String, dir: Boolean): SmbFile {
+        val root = SmbFile("smb://${s.host}/", context(s))
         val parts = path.split('/').filter { it.isNotEmpty() }
-        val enc = parts.joinToString("/") { it.replace("%", "%25").replace("#", "%23").replace("?", "%3F") }
-        return "smb://${s.host}/" + enc + if (parts.isNotEmpty() && dir) "/" else ""
+        return if (parts.isEmpty()) root else SmbFile(root, parts.joinToString("/") + if (dir) "/" else "")
     }
 
     /**
@@ -115,7 +115,7 @@ class SmbSource(private val store: Store) {
         val key = "${s.id}|$path"
         val cached = synchronized(dirCache) { dirCache[key]?.takeIf { System.currentTimeMillis() - it.first < 30_000 }?.second }
         val raw = cached ?: wrap {
-            val dir = SmbFile(url(s, path, true), context(s))
+            val dir = file(s, path, dir = true)
             val entries = dir.listFiles().mapNotNull { f ->
                 val name = f.name.trimEnd('/')
                 if (name.isEmpty() || name.endsWith("$") || name.startsWith("$")) return@mapNotNull null

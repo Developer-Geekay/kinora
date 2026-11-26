@@ -22,6 +22,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
@@ -109,20 +111,38 @@ fun HomeScreen(onSave: (Video) -> Unit, openPlaylist: (String) -> Unit) {
     val feed = app.feed
     val history = app.store.history
     val playlists = app.store.playlists
-    val resumable = history.filter { !it.done && app.store.resumeSec(it.video.id) > 15 && it.video.duration > 0 }.take(10)
+    val resumable = app.store.continueWatching().take(10)
+    var confirmClear by remember { mutableStateOf(false) }
+    if (confirmClear) AlertDialog(
+        onDismissRequest = { confirmClear = false },
+        title = { Text("Remove all from Continue watching?") },
+        text = { Text("Where you stopped is forgotten. Your watch history stays.") },
+        confirmButton = { TextButton({ app.store.forgetPositions(app.store.continueWatching().map { it.id }); confirmClear = false }) { Text("Remove all") } },
+        dismissButton = { TextButton({ confirmClear = false }) { Text("Cancel") } },
+    )
     androidx.compose.runtime.LaunchedEffect(history.firstOrNull()?.video?.id, app.store.source) { feed.refresh() }
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 16.dp)) {
         if (resumable.isNotEmpty()) {
-            item { SectionTitle("Continue watching") }
+            item {
+                Row(verticalAlignment = Alignment.Bottom) {
+                    Box(Modifier.weight(1f)) { SectionTitle("Continue watching") }
+                    TextButton({ confirmClear = true }, Modifier.focusRing(PillShape).padding(end = 8.dp)) { Text("Remove all") }
+                }
+            }
             item {
                 LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    items(resumable, key = { it.video.id }) { h ->
-                        val v = h.video
+                    items(resumable, key = { it.id }) { v ->
+                        val remove = MenuAction("Remove from Continue watching", Icons.Filled.Delete, danger = true) { app.store.forgetPositions(listOf(v.id)) }
                         Column(Modifier.width(220.dp).focusRing().clickable { play(listOf(v), 0) }) {
                             Thumb(v, Modifier.fillMaxWidth(), progress = app.store.resumeSec(v.id).toFloat() / v.duration)
-                            Text(v.title, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 6.dp))
-                            Text(v.channel, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Row(verticalAlignment = Alignment.Top) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(v.title, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 6.dp))
+                                    Text(v.channel, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                                MoreMenu(listOf(remove) + videoActions(v, onSave))
+                            }
                         }
                     }
                 }
